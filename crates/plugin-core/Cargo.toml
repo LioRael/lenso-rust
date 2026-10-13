@@ -1,0 +1,14 @@
+[package]
+name = "lenso-plugin-core"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+description = "Typed native plugin composition and explicit asynchronous lifecycle"
+
+[dependencies]
+tokio = { version = "1", features = ["rt", "sync"] }
+thiserror = "2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }

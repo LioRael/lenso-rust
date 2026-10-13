@@ -1,0 +1,23 @@
+[workspace]
+members = [
+    "crates/plugin-core",
+    "crates/log-plugins",
+    "crates/plugin-runtime",
+    "examples/batch",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+license = "MIT"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync", "signal"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+lenso-plugin-core = { path = "crates/plugin-core" }
+lenso-log-plugins = { path = "crates/log-plugins" }
+lenso-plugin-runtime = { path = "crates/plugin-runtime" }
+runtime-sdk = { git = "https://github.com/LioRael/lenso-runtime", rev = "dd0eb084e490e5e4bda05ce0dbb503f3aae50590" }

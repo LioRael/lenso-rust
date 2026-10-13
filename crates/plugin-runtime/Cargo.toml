@@ -1,0 +1,13 @@
+[package]
+name = "lenso-plugin-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+lenso-plugin-core.workspace = true
+runtime-sdk.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
