@@ -1,0 +1,16 @@
+README.md
+  h_9d56aba080c170 22-23
+crates/plugin-core/Cargo.toml
+  h_9d56aba080c170 5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f10badf599b8c2b8c0bf1fd6cee8a5b4129d2017",
+  "prompts": {},
+  "humans": {
+    "h_9d56aba080c170": {
+      "author": "LioRael <leo@lenso.dev>"
+    }
+  }
+}
