@@ -19,7 +19,8 @@ Lenso, its CLI and Console remain separately owned.
 ## Build and offline usage
 
 Use Rust/Cargo. The generated batch bindings use `std::sync::LazyLock`, requiring
-Rust 1.80 or newer for the full workspace. Core retains its Rust 1.75 minimum.
+Rust 1.80 or newer for the full workspace. Core declares a Rust 1.77 minimum,
+matching the locked `thiserror` dependency.
 
 ```sh
 cargo build --workspace --locked
