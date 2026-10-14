@@ -5,6 +5,7 @@
 //! See the crate README for a complete example and lifecycle boundaries.
 #![doc = include_str!("../README.md")]
 
+use futures_util::FutureExt;
 use std::{
     any::{Any, TypeId},
     collections::{HashMap, HashSet},
@@ -13,10 +14,17 @@ use std::{
     future::Future,
     hash::{Hash, Hasher},
     marker::PhantomData,
+    panic::{catch_unwind, AssertUnwindSafe},
     pin::Pin,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
 };
-use tokio::sync::{watch, Mutex};
+use tokio::sync::{oneshot, watch, Mutex, Notify};
+
+mod config;
+pub use config::{Config, ConfigError, ConfigFieldSource, ConfigSource};
 
 /// An application or cleanup error supplied by a plugin.
 pub type BoxError = Box<dyn Error + Send + Sync + 'static>;
@@ -117,9 +125,58 @@ pub enum CleanupPhase {
 }
 
 struct RegisteredCleanup {
+    phase: CleanupPhase,
+    action: CleanupHandle,
+}
+
+type CleanupResult = Result<(), Arc<dyn Error + Send + Sync>>;
+
+struct OnceCleanup {
+    action: Mutex<Option<Cleanup>>,
+    completion: watch::Sender<Option<CleanupResult>>,
+}
+
+/// An optional early disposer for a registered resource.
+///
+/// Early disposal, rollback and shutdown join the same owned cleanup task.
+/// The plugin must ensure early disposal does not invalidate active dependents.
+#[derive(Clone)]
+pub struct CleanupHandle {
+    inner: Arc<OnceCleanup>,
     instance: String,
     phase: CleanupPhase,
-    action: Cleanup,
+}
+
+impl CleanupHandle {
+    /// Dispose once and share completion, even when a disposal waiter is cancelled.
+    /// A failed early disposal remains visible to later rollback/shutdown.
+    pub async fn dispose(&self) -> Result<(), CleanupFailure> {
+        let mut completion = self.inner.completion.subscribe();
+        let mut action = self.inner.action.lock().await;
+        if let Some(action) = action.take() {
+            let inner = self.inner.clone();
+            tokio::spawn(async move {
+                let result = tokio::spawn(async move { action().await }).await;
+                let result = match result {
+                    Ok(Ok(())) => Ok(()),
+                    Ok(Err(e)) => Err(Arc::from(e)),
+                    Err(e) => Err(Arc::new(e) as Arc<dyn Error + Send + Sync>),
+                };
+                inner.completion.send_replace(Some(result));
+            });
+        }
+        drop(action);
+        loop {
+            if let Some(result) = completion.borrow_and_update().clone() {
+                return result.map_err(|source| CleanupFailure {
+                    instance: self.instance.clone(),
+                    phase: self.phase,
+                    source,
+                });
+            }
+            let _ = completion.changed().await;
+        }
+    }
 }
 
 /// Context restricted to the instance's declared dependencies.
@@ -128,8 +185,17 @@ pub struct Setup {
     dependencies: HashSet<InstanceKey>,
     instance: String,
     cleanups: Vec<RegisteredCleanup>,
+    gate: WorkGate,
 }
 impl Setup {
+    /// Admission gate shared by every instance in this application.
+    pub fn work_gate(&self) -> WorkGate {
+        self.gate.clone()
+    }
+    /// Name assigned to this particular instance.
+    pub fn instance_name(&self) -> &str {
+        &self.instance
+    }
     /// Get a declared dependency. Undeclared and unavailable handles are errors.
     pub fn get<S: Send + Sync + 'static>(&self, handle: &Handle<S>) -> Result<Arc<S>, AccessError> {
         if !self.dependencies.contains(&handle.key) {
@@ -141,22 +207,35 @@ impl Setup {
     ///
     /// Within each phase, callbacks run in reverse registration/startup order.
     /// Captured resources must be owned; callbacks are invoked exactly once.
-    pub fn on_cleanup<F, Fut>(&mut self, phase: CleanupPhase, action: F)
+    /// The returned handle allows explicitly coordinated early disposal.
+    pub fn on_cleanup<F, Fut>(&mut self, phase: CleanupPhase, action: F) -> CleanupHandle
     where
         F: FnOnce() -> Fut + Send + 'static,
         Fut: Future<Output = Result<(), BoxError>> + Send + 'static,
     {
-        self.cleanups.push(RegisteredCleanup {
+        let (completion, _) = watch::channel(None);
+        let handle = CleanupHandle {
+            inner: Arc::new(OnceCleanup {
+                action: Mutex::new(Some(Box::new(move || Box::pin(action())))),
+                completion,
+            }),
             instance: self.instance.clone(),
             phase,
-            action: Box::new(move || Box::pin(action())),
+        };
+        self.cleanups.push(RegisteredCleanup {
+            phase,
+            action: handle.clone(),
         });
+        handle
     }
 }
 
 /// Typed dependency access failed.
 #[derive(Debug, thiserror::Error)]
 pub enum AccessError {
+    /// Shutdown has sealed admission to this application.
+    #[error("application is closing")]
+    Closing,
     /// The instance did not declare this dependency.
     #[error("handle is not a declared dependency")]
     Undeclared,
@@ -177,6 +256,68 @@ fn get_service<S: Send + Sync + 'static>(
         .ok_or(AccessError::Unavailable)?
         .downcast::<S>()
         .map_err(|_| AccessError::TypeMismatch)
+}
+
+const SEALED: usize = 1 << (usize::BITS - 1);
+
+#[derive(Default)]
+struct Admission {
+    state: AtomicUsize,
+    drained: Notify,
+}
+
+/// Shared admission boundary for business work, including retained `Arc` services.
+///
+/// Enter once at the outer business entry and retain the guard through all awaits.
+/// Dependency-local log/cache calls within admitted work must not reenter: shutdown
+/// seals new admission while already admitted work is allowed to finish.
+#[derive(Clone, Default)]
+pub struct WorkGate(Arc<Admission>);
+
+impl WorkGate {
+    /// Atomically admit work unless shutdown has sealed the gate.
+    pub fn enter(&self) -> Result<WorkGuard, AccessError> {
+        let mut state = self.0.state.load(Ordering::Acquire);
+        loop {
+            if state & SEALED != 0 || state == SEALED - 1 {
+                return Err(AccessError::Closing);
+            }
+            match self.0.state.compare_exchange_weak(
+                state,
+                state + 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return Ok(WorkGuard { gate: self.clone() }),
+                Err(current) => state = current,
+            }
+        }
+    }
+
+    fn seal(&self) {
+        self.0.state.fetch_or(SEALED, Ordering::AcqRel);
+    }
+
+    async fn drain(&self) {
+        while self.0.state.load(Ordering::Acquire) & !SEALED != 0 {
+            self.0.drained.notified().await;
+        }
+    }
+}
+
+/// An admitted unit of business work. Dropping it releases the in-flight count.
+#[must_use = "retain the guard until business work and its dependency calls finish"]
+pub struct WorkGuard {
+    gate: WorkGate,
+}
+
+impl Drop for WorkGuard {
+    fn drop(&mut self) {
+        if self.gate.0.state.fetch_sub(1, Ordering::AcqRel) == SEALED | 1 {
+            // There is exactly one cleanup owner; a stored permit avoids a lost wakeup.
+            self.gate.0.drained.notify_one();
+        }
+    }
 }
 
 struct InstalledInstance {
@@ -285,10 +426,24 @@ impl App {
         for i in &self.instances {
             let deps = match &i.plugin {
                 Some(plugin) => {
-                    if let Err(e) = plugin.validate() {
-                        errors.push(format!("invalid config for {}: {e}", i.name));
+                    match catch_unwind(AssertUnwindSafe(|| plugin.validate())) {
+                        Ok(Ok(())) => {}
+                        Ok(Err(error)) => {
+                            let diagnostic = error
+                                .downcast_ref::<ConfigError>()
+                                .map(|error| error.to_string())
+                                .unwrap_or_else(|| "plugin configuration rejected".into());
+                            errors.push(format!("invalid config for {}: {diagnostic}", i.name));
+                        }
+                        Err(_) => errors.push(format!("validation panicked for {}", i.name)),
                     }
-                    plugin.dependencies()
+                    match catch_unwind(AssertUnwindSafe(|| plugin.dependencies())) {
+                        Ok(deps) => deps,
+                        Err(_) => {
+                            errors.push(format!("dependencies panicked for {}", i.name));
+                            Vec::new()
+                        }
+                    }
                 }
                 None => {
                     errors.push(format!("unbound instance: {}", i.name));
@@ -331,13 +486,36 @@ impl App {
     }
     /// Validate the complete graph, then set up in dependency order.
     ///
-    /// Call from an active Tokio runtime. Do not cancel startup: only shutdown
-    /// waiters have a cancellation guarantee. Returned setup errors roll back
-    /// the failing instance's registered resources and all prior instances.
-    pub async fn start(mut self) -> Result<RunningApp, StartError> {
+    /// Call from an active Tokio runtime. An owned task finishes startup even if
+    /// this waiter is cancelled, and shuts down an app not acknowledged by its
+    /// caller. Setup errors and unwind panics roll back registered resources.
+    /// Runtime termination and abort-on-panic are outside this guarantee.
+    pub async fn start(self) -> Result<RunningApp, StartError> {
+        let (delivery, receiver) = oneshot::channel();
+        let (acknowledge, acknowledged) = oneshot::channel();
+        tokio::spawn(async move {
+            let result = self.start_owned().await;
+            let running = result.as_ref().ok().cloned();
+            let delivered = delivery.send(result).is_ok();
+            if let Some(running) = running {
+                if !delivered || acknowledged.await.is_err() {
+                    let _ = running.shutdown().await;
+                }
+            }
+        });
+        let result = receiver.await.map_err(|_| {
+            StartError::Validation(vec!["owned startup task stopped before delivery".into()])
+        })?;
+        // No await between receiving ownership and acknowledging it.
+        let _ = acknowledge.send(());
+        result
+    }
+
+    async fn start_owned(mut self) -> Result<RunningApp, StartError> {
         let (order, dependencies) = self.plan()?;
         let mut services = HashMap::new();
         let mut cleanups = Vec::new();
+        let gate = WorkGate::default();
         for index in order {
             let instance = &mut self.instances[index];
             let mut setup = Setup {
@@ -345,18 +523,24 @@ impl App {
                 dependencies: dependencies[index].iter().cloned().collect(),
                 instance: instance.name.clone(),
                 cleanups: Vec::new(),
+                gate: gate.clone(),
             };
             let Some(plugin) = instance.plugin.take() else {
                 return Err(StartError::Validation(vec!["unbound instance".into()]));
             };
-            let result = plugin.setup(&mut setup).await;
+            // Future construction happens inside this async block so an unwind
+            // cannot drop Setup and lose callbacks registered before the panic.
+            let result = AssertUnwindSafe(async { plugin.setup(&mut setup).await })
+                .catch_unwind()
+                .await
+                .unwrap_or_else(|_| Err("plugin setup panicked".into()));
             cleanups.extend(setup.cleanups);
             match result {
                 Ok(service) => {
                     services.insert(instance.key.clone(), service);
                 }
                 Err(source) => {
-                    let cleanup = run_cleanups(cleanups).await.err();
+                    let cleanup = run_cleanups(cleanups, &gate).await.err();
                     return Err(StartError::Setup {
                         instance: instance.name.clone(),
                         source,
@@ -371,6 +555,7 @@ impl App {
                 services,
                 cleanups: Mutex::new(Some(cleanups)),
                 completion,
+                gate,
             }),
         })
     }
@@ -396,7 +581,8 @@ pub enum StartError {
 }
 
 /// One cleanup callback failed; subsequent callbacks still run.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, thiserror::Error)]
+#[error("cleanup failed for {instance} in {phase:?}: {source}")]
 pub struct CleanupFailure {
     /// Instance owning the callback.
     pub instance: String,
@@ -413,25 +599,23 @@ pub struct ShutdownError {
     pub failures: Vec<CleanupFailure>,
 }
 
-async fn run_cleanups(cleanups: Vec<RegisteredCleanup>) -> Result<(), ShutdownError> {
+async fn run_cleanups(
+    cleanups: Vec<RegisteredCleanup>,
+    gate: &WorkGate,
+) -> Result<(), ShutdownError> {
+    gate.seal();
     let mut failures = Vec::new();
     let mut pending: Vec<_> = cleanups.into_iter().rev().map(Some).collect();
     for phase in [CleanupPhase::Entrances, CleanupPhase::Resources] {
+        if phase == CleanupPhase::Resources {
+            gate.drain().await;
+        }
         for entry in &mut pending {
             if entry.as_ref().is_some_and(|c| c.phase == phase) {
                 if let Some(c) = entry.take() {
-                    // A callback panic must not strand completion or skip later cleanup.
-                    let result = tokio::spawn(async move { (c.action)().await }).await;
-                    let source = match result {
-                        Ok(Ok(())) => continue,
-                        Ok(Err(e)) => Arc::from(e),
-                        Err(e) => Arc::new(e) as Arc<dyn Error + Send + Sync>,
-                    };
-                    failures.push(CleanupFailure {
-                        instance: c.instance,
-                        phase,
-                        source,
-                    });
+                    if let Err(failure) = c.action.dispose().await {
+                        failures.push(failure);
+                    }
                 }
             }
         }
@@ -447,6 +631,7 @@ struct Running {
     services: HashMap<InstanceKey, Service>,
     cleanups: Mutex<Option<Vec<RegisteredCleanup>>>,
     completion: watch::Sender<Option<Result<(), ShutdownError>>>,
+    gate: WorkGate,
 }
 /// Shared application lifetime. Dropping this value does **not** run async cleanup.
 #[derive(Clone)]
@@ -454,8 +639,14 @@ pub struct RunningApp {
     inner: Arc<Running>,
 }
 impl RunningApp {
-    /// Get a service from this app. Retained services follow their plugin's post-shutdown semantics.
+    /// Admission gate for business work on this application's services.
+    pub fn work_gate(&self) -> WorkGate {
+        self.inner.gate.clone()
+    }
+    /// Get a service while the app is open. Retained services must use the gate
+    /// at business entry; merely obtaining an `Arc` does not admit work.
     pub fn get<S: Send + Sync + 'static>(&self, handle: &Handle<S>) -> Result<Arc<S>, AccessError> {
+        let _access = self.inner.gate.enter()?;
         get_service(&self.inner.services, handle)
     }
     /// Shut down once and share completion across concurrent/repeated callers.
@@ -467,9 +658,10 @@ impl RunningApp {
         let mut completion = self.inner.completion.subscribe();
         let mut cleanups = self.inner.cleanups.lock().await;
         if let Some(cleanups) = cleanups.take() {
+            self.inner.gate.seal();
             let inner = self.inner.clone();
             tokio::spawn(async move {
-                let result = run_cleanups(cleanups).await;
+                let result = run_cleanups(cleanups, &inner.gate).await;
                 inner.completion.send_replace(Some(result));
             });
         }

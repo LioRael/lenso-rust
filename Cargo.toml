@@ -2,6 +2,8 @@
 members = [
     "crates/plugin-core",
     "crates/log-plugins",
+    "crates/log",
+    "crates/cache",
     "crates/plugin-runtime",
     "examples/batch",
 ]
@@ -19,5 +21,7 @@ serde_json = "1"
 thiserror = "2"
 lenso-plugin-core = { path = "crates/plugin-core" }
 lenso-log-plugins = { path = "crates/log-plugins" }
+lenso-log = { path = "crates/log" }
+lenso-cache = { path = "crates/cache" }
 lenso-plugin-runtime = { path = "crates/plugin-runtime" }
 runtime-sdk = { git = "https://github.com/LioRael/lenso-runtime", rev = "dd0eb084e490e5e4bda05ce0dbb503f3aae50590" }

@@ -43,6 +43,8 @@ interrupt() {
 trap interrupt HUP INT TERM
 stage="$repo_root/target/.lenso/runtime-rust-stage"
 mkdir -p "$stage"
+# One candidate inventory is shared with Runtime verification, not another manifest format.
+bun "$repo_root/scripts/stage-native.ts" --candidate "$runtime_root" "$stage/.candidate.json" "$repo_root"
 if ! cmp -s "$repo_root/Cargo.lock" "$stage/.source-Cargo.lock"; then
   cp -p "$repo_root/Cargo.lock" "$stage/Cargo.lock"
   cp -p "$repo_root/Cargo.lock" "$stage/.source-Cargo.lock"
@@ -70,7 +72,7 @@ fi
 
 mkdir -p "$(dirname -- "$out")" "$target_dir"
 tmp_out="${out}.tmp.$$"
-trap 'rm -f "$tmp_out"' EXIT
+trap 'rm -f "$tmp_out" "$tmp_out.source.json"' EXIT
 if [ "$profile" = release ]; then set -- --release; else set --; fi
 (
   cd "$stage"
@@ -84,6 +86,8 @@ child_pid=
 trap - HUP INT TERM
 cp "$target_dir/$profile/$bin" "$tmp_out"
 chmod +x "$tmp_out"
+bun "$repo_root/scripts/stage-native.ts" --record "$runtime_root" "$tmp_out" "$stage/.candidate.json" "$repo_root" "$profile"
 mv -f "$tmp_out" "$out"
+mv -f "$tmp_out.source.json" "$out.source.json"
 trap - EXIT HUP INT TERM
 printf '%s\n' "$out"

@@ -6,6 +6,10 @@ Native Rust plugin composition and applications. This repository owns:
   planning, validation, setup and explicit asynchronous cleanup.
 - `crates/log-plugins` (`lenso-log-plugins`): replaceable JSON-lines and memory
   sources, ordinary aggregation services and a transport-free example.
+- `crates/log` (`lenso-log`): structured tracing-backed logging, scoped
+  subscribers, redaction and explicit owned flush.
+- `crates/cache` (`lenso-cache`): typed bounded memory, finite TTL, exact
+  invalidation and cancellation-safe shared loads.
 - `crates/plugin-runtime` (`lenso-plugin-runtime`): optional Runtime connection
   injection and explicit post-setup exports.
 - `examples/batch`: the native serving App (`logs-batch`) and generated-client
@@ -15,6 +19,10 @@ Native Rust plugin composition and applications. This repository owns:
 kernel, protocol, Rust/TypeScript SDKs, transport, contract generator and shared
 cross-language smoke. None of those implementations is copied here. TypeScript
 Lenso, its CLI and Console remain separately owned.
+
+The [first-wave contract](FIRST_WAVE.md) defines shared behavior, ownership,
+supported TS alignment and deliberate differences. Log and Cache stay local;
+only selected business exports use Runtime.
 
 ## Build and offline usage
 
@@ -26,6 +34,8 @@ matching the locked `thiserror` dependency.
 cargo build --workspace --locked
 cargo test --workspace --locked
 cargo run --locked -p lenso-log-plugins --example offline
+cargo run --locked -p lenso-log --example log-native
+cargo run --locked -p lenso-cache --example cache-native
 ```
 
 The offline example needs no kernel or port. It installs two separately
@@ -72,23 +82,28 @@ to Git revision `dd0eb084e490e5e4bda05ce0dbb503f3aae50590` at
 source. There is no default sibling checkout dependency or committed local path.
 This is source integration, not a claim of crates.io publication.
 
-Build Runtime first, then Rust, and run the existing Runtime smoke with an
-explicit Rust root (replace the placeholder paths):
+Verify the formal pin with the locked commands above. For cross-source smoke,
+build both repositories against one explicitly selected Runtime candidate
+(replace the placeholder paths):
 
 ```sh
 cd /path/to/lenso-runtime
 bun install --frozen-lockfile
 bun run build
+bun scripts/local.ts debug
 
 cd /path/to/lenso-rust
-cargo build --workspace --locked
+sh scripts/build-runtime.sh --runtime-root /path/to/lenso-runtime
+sh scripts/build-runtime.sh --runtime-root /path/to/lenso-runtime \
+  --bin logs-client --out target/debug/logs-client
 
 cd /path/to/lenso-runtime
 LENSO_RUST_ROOT=/path/to/lenso-rust bun run smoke
 ```
 
-The Runtime checkout must include its optional `LENSO_RUST_ROOT` smoke mode. That
-mode selects this repository's `target/debug/logs-batch` and
+The Runtime checkout must include its candidate-proof helpers in
+`scripts/local.ts` and its `LENSO_RUST_ROOT` smoke mode. That mode selects this
+repository's `target/debug/logs-batch` and
 `target/debug/logs-client`, using Runtime's real kernel, generated TypeScript
 client and existing tests for calls, streaming, cancellation, deadlines and lost
 connections. It starts and stops its own processes on an available loopback port.
@@ -130,6 +145,11 @@ The repository's manifest, formal dependency pin and `Cargo.lock` stay unchanged
 Successful builds atomically copy the executable to `--out`; failed builds leave
 the prior executable intact. `--target-dir` selects the Cargo artifact cache;
 `--release --out target/release/logs-batch` builds the measured optimized binary.
+The binary sidecar records Runtime/native source hashes, actual Cargo profile,
+binary SHA-256 and build wall time. Current cross-source checks reject missing
+or stale proofs, rather than silently accepting a formal-pin or older build as
+the selected local candidate. This consistency check is not signed artifact
+attestation and does not replace the separate formal-pin verification.
 No npm/crates release is involved.
 
 The serving App accepts `LENSO_RUNTIME_INSTANCE` or `LENSO_WORKSPACE_INSTANCE`
@@ -157,17 +177,20 @@ remain enforced by the existing resource owner.
 
 `Instance::new` acquires no resources. `App::start` validates and plans the whole
 graph before setup. Register cleanup immediately after acquiring a resource,
-before another fallible operation or await. Returned setup errors roll back
-registered resources; validation/setup panics are not returned setup errors.
+before another fallible operation or await. Returned setup errors and unwinding
+setup panics roll back registered resources. Preflight panics fail before setup.
 
-Core startup is **not cancellation-safe**: do not drop its future once polled.
-The serving adapter's `start_runtime_app` owns startup in a separate Tokio task
-and shuts down an App it cannot deliver to a cancelled caller. Export factories
-run after native setup; only explicit exports become ready. This is not a
-guarantee against process termination, a stopped Tokio runtime or plugin panics.
+Core's default `App::start` owns startup independently of its waiter and shuts
+down an App it cannot deliver. Cancelling a waiter is not a bounded way to stop
+uncooperative setup. The serving adapter also owns post-setup export activation;
+only explicit exports become ready. Process termination, `panic=abort` and a
+stopped Tokio runtime cannot be recovered.
 
-Cleanup stops all entrances before releasing resources, in reverse dependency
-order within each phase. Concurrent shutdown waiters share completion; cancelling
-a waiter does not abandon cleanup once it has started. Keep Tokio alive until
-shutdown completes. Dropping an App handle or retained service does not perform
-asynchronous cleanup; services define their own behavior after shutdown.
+Shutdown seals `WorkGate`, stops all entrances, drains accepted `WorkGuard`s,
+then releases resources in reverse dependency order. Entry methods must check
+their captured gate even on retained `Arc` references; dependency Log/Cache calls
+remain available to already accepted work until resource cleanup. Explicit early
+disposal and shutdown share one cleanup completion. Concurrent shutdown waiters
+share results; cancelling a waiter does not abandon cleanup. Keep Tokio alive
+until shutdown completes. Dropping an App or retained service does not perform
+asynchronous cleanup; arbitrary service methods are not intercepted automatically.

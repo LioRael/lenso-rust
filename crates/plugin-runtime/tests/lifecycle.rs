@@ -274,3 +274,85 @@ async fn invalid_runtime_configuration_prevents_native_setup_and_connection() {
         .await
         .is_err());
 }
+
+#[tokio::test]
+async fn panicking_export_factory_rolls_back_without_publishing_ready() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let cleaned = Arc::new(AtomicBool::new(false));
+    let mut app = App::new();
+    let runtime = app.install(
+        "runtime",
+        RuntimePlugin::new(options(&listener, true), 1000),
+    );
+    app.install(
+        "native",
+        Native {
+            runtime: runtime.clone(),
+            cleaned: cleaned.clone(),
+        },
+    );
+    let export = RuntimeExport::new(runtime, |_| panic!("export factory panic"));
+    let start = tokio::spawn(start_runtime_app(app, vec![export]));
+    let mut peer = registered(&listener).await;
+    let call = read(&mut peer).await;
+    assert_eq!(call["type"], "call");
+    write(
+        &mut peer,
+        json!({"type":"result","id":call["id"],"output":42}),
+    )
+    .await;
+    assert_eq!(read(&mut peer).await["type"], "drain");
+    write(&mut peer, json!({"type":"drained"})).await;
+    let error = start.await.unwrap().err().unwrap();
+    assert!(error.to_string().contains("activation_panicked"));
+    assert!(cleaned.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn cancelling_after_runtime_delivery_is_queued_cleans_unacknowledged_app() {
+    use std::{
+        future::Future,
+        task::{Context, Wake, Waker},
+    };
+    use tokio::sync::Semaphore;
+
+    struct DeliveryWake(Arc<Semaphore>);
+    impl Wake for DeliveryWake {
+        fn wake(self: Arc<Self>) {
+            self.0.add_permits(1);
+        }
+    }
+    struct Resource(Arc<Semaphore>);
+    impl Plugin for Resource {
+        type Service = ();
+        async fn setup(self, setup: &mut Setup) -> Result<Arc<()>, BoxError> {
+            setup.on_cleanup(CleanupPhase::Resources, move || async move {
+                self.0.add_permits(1);
+                Ok(())
+            });
+            Ok(Arc::new(()))
+        }
+    }
+    let cleaned = Arc::new(Semaphore::new(0));
+    let delivered = Arc::new(Semaphore::new(0));
+    let mut app = App::new();
+    app.install("resource", Resource(cleaned.clone()));
+    let mut start = Box::pin(start_runtime_app(app, vec![]));
+    let waker = Waker::from(Arc::new(DeliveryWake(delivered.clone())));
+    assert!(start
+        .as_mut()
+        .poll(&mut Context::from_waker(&waker))
+        .is_pending());
+    timeout(Duration::from_secs(2), delivered.acquire())
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    // Delivery woke its receiver, but that future has not been polled to take the App.
+    drop(start);
+    timeout(Duration::from_secs(2), cleaned.acquire())
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+}

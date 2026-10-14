@@ -1,0 +1,79 @@
+name: Native and candidate checks
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      runtime_ref:
+        description: Exact trusted Lenso Runtime candidate commit
+        required: true
+      lenso_ref:
+        description: Exact trusted TypeScript Lenso candidate commit
+        required: true
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --all --check
+      - run: cargo test --workspace --locked
+      - run: cargo clippy --all-targets --all-features --locked -- -D warnings
+  candidate:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: lenso-rust
+      - uses: actions/checkout@v4
+        with:
+          repository: LioRael/lenso-runtime
+          ref: ${{ inputs.runtime_ref }}
+          path: lenso-runtime
+      - uses: actions/checkout@v4
+        with:
+          repository: LioRael/lenso
+          ref: ${{ inputs.lenso_ref }}
+          path: lenso
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build one Runtime candidate
+        working-directory: lenso-runtime
+        run: |
+          bun install --frozen-lockfile --ignore-scripts
+          bun run build:sdk
+          bun run generate
+          bun scripts/local.ts debug
+          bun run typecheck
+          bun test sdk/typescript tools
+      - name: Prepare matching TypeScript App
+        working-directory: lenso
+        run: |
+          bun scripts/prepare-runtime.ts --runtime-root ../lenso-runtime
+          bun install --frozen-lockfile --ignore-scripts
+          bun x --no-install turbo run build --filter=@lenso/cli... --filter=@lenso/runtime... --filter=@lenso/cache... --filter=@lenso/log...
+          bun run --cwd examples/runtime generate
+          bun run --cwd examples/runtime typecheck
+          bun test packages/lenso/test/lifecycle.test.ts packages/cache/test/service.test.ts packages/cache/test/memory.test.ts packages/cache/test/plugin.test.ts packages/log/test examples/runtime/src/batch-app.test.ts
+      - name: Build and verify native App
+        working-directory: lenso-rust
+        run: |
+          export LENSO_RUNTIME_ROOT="$GITHUB_WORKSPACE/lenso-runtime"
+          sh scripts/build-runtime.sh --runtime-root "$LENSO_RUNTIME_ROOT"
+          sh scripts/build-runtime.sh --runtime-root "$LENSO_RUNTIME_ROOT" --bin logs-client --out target/debug/logs-client
+          bun test scripts/build-runtime.test.ts
+      - name: Exercise the existing development lifecycle
+        working-directory: lenso-runtime
+        env:
+          LENSO_ROOT: ${{ github.workspace }}/lenso
+          LENSO_RUST_ROOT: ${{ github.workspace }}/lenso-rust
+        run: |
+          bun run smoke
+          bun run verify:lenso

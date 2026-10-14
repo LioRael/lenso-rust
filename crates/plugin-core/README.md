@@ -1,11 +1,11 @@
 # lenso-plugin-core
 
-Native Rust plugin composition, independent of Lenso Runtime, its SDK, and JSON.
+Native Rust plugin composition, independent of Lenso Runtime and its SDK.
 Each installed instance has a typed handle. The same plugin and service types
 may be installed repeatedly under different names.
 
 ```rust
-use lenso_plugin_core::{App, BoxError, Handle, Instance, InstanceKey, Plugin, Setup};
+use lenso_plugin_core::{AccessError, App, BoxError, Handle, Instance, InstanceKey, Plugin, Setup, WorkGate};
 use std::sync::Arc;
 
 struct Prefix(String);
@@ -17,17 +17,18 @@ impl Plugin for Prefix {
 }
 
 struct GreetingPlugin { prefix: Handle<String> }
-struct Greeting { prefix: Arc<String> }
+struct Greeting { prefix: Arc<String>, gate: WorkGate }
 impl Greeting {
-    async fn greet(&self, name: &str) -> String {
-        format!("{} {name}", self.prefix)
+    async fn greet(&self, name: &str) -> Result<String, AccessError> {
+        let _work = self.gate.enter()?;
+        Ok(format!("{} {name}", self.prefix))
     }
 }
 impl Plugin for GreetingPlugin {
     type Service = Greeting;
     fn dependencies(&self) -> Vec<InstanceKey> { vec![self.prefix.key()] }
     async fn setup(self, setup: &mut Setup) -> Result<Arc<Greeting>, BoxError> {
-        Ok(Arc::new(Greeting { prefix: setup.get(&self.prefix)? }))
+        Ok(Arc::new(Greeting { prefix: setup.get(&self.prefix)?, gate: setup.work_gate() }))
     }
 }
 
@@ -38,7 +39,7 @@ let greeting_instance = Instance::new("greeting", GreetingPlugin { prefix });
 let greeting = greeting_instance.handle();
 let app = App::new().with(greeting_instance).with(prefix_instance);
 let running = app.start().await?;
-assert_eq!(running.get(&greeting)?.greet("Ada").await, "Hello Ada");
+assert_eq!(running.get(&greeting)?.greet("Ada").await?, "Hello Ada");
 running.shutdown().await?;
 # Ok(())
 # }
@@ -62,6 +63,40 @@ startup order. `App::install`, `App::reserve`, and `App::bind` remain available
 for compatibility and forward declarations. Every reservation must be bound;
 foreign handles and duplicate bindings are pre-start errors.
 
+Optional `Config<T>` resolves a serde `Deserialize` type without introducing a
+configuration language. Serde attributes own defaults. Explicit JSON must be an
+object; specifically selected environment values are JSON, so strings require
+quotes. Selected environment > explicit JSON > serde defaults; absent variables
+do not override anything. Nested overrides use object-only JSON pointers.
+
+```rust
+use lenso_plugin_core::Config;
+use serde::Deserialize;
+use serde_json::json;
+
+#[derive(Deserialize)]
+struct Settings { #[serde(default = "default_limit")] limit: usize }
+fn default_limit() -> usize { 10 }
+
+let settings = Config::<Settings>::new("worker")
+    .explicit_json(json!({"limit": 20}))
+    .resolve()?;
+assert_eq!(settings.limit, 20);
+# Ok::<(), lenso_plugin_core::ConfigError>(())
+```
+
+`.env_json("/limit", "WORKER_LIMIT")` selects an environment override. Selection
+order resolves overlapping environment paths, with the last selection winning.
+Errors contain the instance, a declared field JSON pointer (otherwise redacted),
+a fixed reason and redacted provenance, never raw JSON, environment values or
+underlying serde error messages. Use `.diagnostic_field("/path")` for useful
+trusted paths; `.env_json` implicitly declares its selected path. Unknown map keys
+are always redacted. `.sensitive("/credentials")` redacts that subtree's paths.
+`resolve_with_sources()` returns the resolved value and non-value field source
+metadata; do not debug-print the resolved value when it contains secrets.
+`Config` debug output also redacts explicit values. Plugin-owned semantic
+validation remains `Plugin::validate`, and should avoid exposing secrets in errors.
+
 ## Resource ownership and cleanup
 
 After acquiring each resource, register a closure synchronously, before the next
@@ -80,23 +115,40 @@ setup.on_cleanup(CleanupPhase::Resources, move || async move {
 # }
 ```
 
-Returned setup errors roll back callbacks from the failing plugin's partial
+Returned setup errors and unwind panics roll back callbacks from the failing plugin's partial
 setup and every previously started instance. Cleanup has two global phases:
-all `Entrances` callbacks first, then all `Resources` callbacks. Each phase runs
+seal admission, all `Entrances` callbacks, drain admitted work, then all `Resources`
+callbacks. Each phase runs
 in reverse dependency/startup order and reverse registration order per instance.
 Every callback is awaited; errors and callback panics are collected without
 skipping later callbacks. Startup preserves both its original error and rollback
 errors.
+
+`on_cleanup` returns an optional `CleanupHandle`. Its `dispose().await` supports
+explicit early disposal and joins the same callback completion as rollback and
+shutdown. Failed early disposal remains visible in rollback/shutdown; cancelling
+a disposer waiter does not cancel its owned cleanup task. Plugins must coordinate
+early resource release with their active dependents; early disposal itself does
+not seal the application's gate.
 
 `RunningApp` is cloneable. Concurrent and repeated `shutdown` calls share one
 completion and aggregate result. Once shutdown begins, cancelling or dropping a
 waiter does not cancel cleanup: Tokio owns its task. Keep the Tokio runtime alive
 until another waiter confirms completion.
 
-Cleanup is explicit. Dropping handles, services, or `RunningApp` does not run
-asynchronous cleanup. Services may be retained after shutdown; plugins must
-define how their ordinary methods behave after their underlying resources close.
-Startup is **not cancellation-safe**; do not drop its future once polled.
-Panics in plugin validation/setup are not treated as returned setup errors.
-An adapter requiring cancellable startup must own startup in a separate task
-and explicitly shut down an app that cannot be delivered to its caller.
+Cleanup is explicit. Dropping handles, services, or an acknowledged `RunningApp`
+does not run asynchronous cleanup. `get` rejects access once shutdown seals the
+gate. A service's retained `Arc` must use `Setup::work_gate()` at its outer
+business entry, keeping its `WorkGuard` through every await and dependency call.
+Dependency-local logging/cache methods used within that work must **not** reenter
+the gate: admitted work is allowed to finish after sealing.
+
+Startup is owned by a Tokio task. Cancelling a startup waiter lets setup finish;
+errors roll back and a successfully started app not acknowledged by its caller
+is shut down. Even cancellation after delivery is queued cannot lose cleanup.
+This is not a timeout: a blocked plugin setup must finish cooperatively before
+cleanup can run. Keep the runtime alive. Unwind panics in validation/dependencies
+become validation failures before any setup; setup construction/poll unwinds
+preserve the current `Setup` and run rollback. Abort-on-panic, runtime termination
+and plugin resources acquired without immediately registering cleanup are outside
+these guarantees.

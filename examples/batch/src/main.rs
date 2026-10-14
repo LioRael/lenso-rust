@@ -1,8 +1,13 @@
-use lenso_log_plugins::{AggregateConfig, LogAggregationPlugin, LogAggregator, MemoryLogSource};
-use lenso_plugin_core::{App, BoxError, Instance};
+use lenso_cache::{CacheConfig, CachePlugin};
+use lenso_log::LoggerPlugin;
+use lenso_log_plugins::{AggregateConfig, LogAggregationPlugin, MemoryLogSource, Summary};
+use lenso_plugin_core::{App, BoxError, Handle, Instance};
 use lenso_plugin_runtime::{start_runtime_app, RuntimeExport, RuntimePlugin};
 use runtime_sdk::{BusinessError, HandlerContext, HostOptions, RuntimeError, StreamSender};
 use std::{sync::Arc, time::Duration};
+mod benchmark;
+mod native;
+use native::{BatchPlugin, BatchService};
 pub mod logs {
     include!("../../generated/logs.rs");
 }
@@ -11,7 +16,7 @@ use logs::*;
 async fn aggregate_native(
     input: AggregateInput,
     context: HandlerContext,
-    service: Arc<LogAggregator<MemoryLogSource>>,
+    service: Arc<BatchService>,
 ) -> Result<AggregateOutput, BusinessError<AggregateError>> {
     let records: Vec<_> = input
         .logs
@@ -25,10 +30,14 @@ async fn aggregate_native(
     let timing = std::env::var("LENSO_PERF_TIMING").as_deref() == Ok("1");
     let business_started = std::time::Instant::now();
     let result = service
-        .aggregate_records_with_cancellation(&records, || context.cancellation.is_cancelled())
+        .aggregate_with_cancel(records, context.cancellation.cancelled())
+        .await
         .map_err(|error| {
             BusinessError(AggregateError {
-                reason: error.reason,
+                reason: error
+                    .downcast_ref::<lenso_log_plugins::AggregateError>()
+                    .map(|error| error.reason.clone())
+                    .unwrap_or_else(|| "Batch unavailable".into()),
             })
         })?;
     if timing {
@@ -52,11 +61,42 @@ async fn aggregate(
     input: AggregateInput,
     context: HandlerContext,
 ) -> Result<AggregateOutput, BusinessError<AggregateError>> {
-    let service = Arc::new(LogAggregator::new(
-        Arc::new(MemoryLogSource::default()),
-        AggregateConfig::default(),
-    ));
-    aggregate_native(input, context, service).await
+    let (app, handle) = native_app(CacheConfig::default());
+    let running = app.start().await.unwrap();
+    let result = aggregate_native(input, context, running.get(&handle).unwrap()).await;
+    running.shutdown().await.unwrap();
+    result
+}
+
+fn native_app(config: CacheConfig) -> (App, Handle<BatchService>) {
+    let source = Instance::new("logs-source", MemoryLogSource::default());
+    let aggregation = Instance::new(
+        "aggregation",
+        LogAggregationPlugin::new(source.handle(), AggregateConfig::default()),
+    );
+    let cache = Instance::new("batch-cache", CachePlugin::<Summary>::new(config));
+    let logger = Instance::new(
+        "batch-log",
+        LoggerPlugin::new("batch", lenso_log::LoggerOptions::default()),
+    );
+    let batch = Instance::new(
+        "batch",
+        BatchPlugin {
+            aggregation: aggregation.handle(),
+            cache: cache.handle(),
+            logger: logger.handle(),
+        },
+    );
+    let handle = batch.handle();
+    (
+        App::new()
+            .with(source)
+            .with(aggregation)
+            .with(cache)
+            .with(logger)
+            .with(batch),
+        handle,
+    )
 }
 
 async fn progress(
@@ -89,6 +129,12 @@ async fn progress(
 }
 #[tokio::main]
 async fn main() -> Result<(), BoxError> {
+    match std::env::args().nth(1).as_deref() {
+        Some("--native-bench") => return benchmark::run().await,
+        Some("--native") => return benchmark::native_call().await,
+        Some(_) => return Err("Usage: logs-batch [--native | --native-bench]".into()),
+        None => (),
+    }
     let initialization_started = std::time::Instant::now();
     let port = std::env::var("LENSO_RUNTIME_PORT")
         .unwrap_or_else(|_| "7331".into())
@@ -98,14 +144,18 @@ async fn main() -> Result<(), BoxError> {
         .unwrap_or_else(|_| "rust-one".into());
     let service = std::env::var("LENSO_RUNTIME_SERVICE").unwrap_or_else(|_| "batch".into());
     let diagnostics = std::env::var_os("LENSO_RUNTIME_DIAGNOSTICS").is_some();
-    let mut initialization_count = 0;
-    let source = Instance::new("logs-source", MemoryLogSource::default());
-    initialization_count += 1;
-    let aggregation = Instance::new(
-        "aggregation",
-        LogAggregationPlugin::new(source.handle(), AggregateConfig::default()),
-    );
-    initialization_count += 1;
+    let config: BatchConfig = lenso_plugin_core::Config::new("batch-cache")
+        .explicit_json(serde_json::json!({}))
+        .env_json("/cache_ttl_ms", "LENSO_BATCH_CACHE_TTL_MS")
+        .resolve()?;
+    if config.cache_ttl_ms > 86_400_000 {
+        return Err("batch-cache.cache_ttl_ms must be <= 86400000".into());
+    }
+    let (app, batch_handle) = native_app(CacheConfig {
+        default_ttl: Duration::from_millis(config.cache_ttl_ms),
+        ..CacheConfig::default()
+    });
+    let initialization_count = 6;
     let runtime = Instance::new(
         "runtime",
         RuntimePlugin::new(
@@ -120,16 +170,14 @@ async fn main() -> Result<(), BoxError> {
             5000,
         ),
     );
-    initialization_count += 1;
-    let aggregation_handle = aggregation.handle();
     let export = RuntimeExport::new(runtime.handle(), move |running| {
-        let service = running.get(&aggregation_handle)?;
+        let service = running.get(&batch_handle)?;
         Ok(LogsServer::new()
             .aggregate(move |input, context| aggregate_native(input, context, service.clone()))
             .progress(progress)
             .build()?)
     });
-    let app = App::new().with(source).with(aggregation).with(runtime);
+    let app = app.with(runtime);
     let running = start_runtime_app(app, vec![export]).await?;
     let initialization_elapsed_ms = initialization_started.elapsed().as_millis();
     eprintln!(
@@ -164,6 +212,19 @@ async fn main() -> Result<(), BoxError> {
     tokio::signal::ctrl_c().await?;
     running.shutdown().await?;
     Ok(())
+}
+
+#[derive(serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct BatchConfig {
+    cache_ttl_ms: u64,
+}
+impl Default for BatchConfig {
+    fn default() -> Self {
+        Self {
+            cache_ttl_ms: 60_000,
+        }
+    }
 }
 
 #[cfg(test)]

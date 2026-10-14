@@ -3,6 +3,36 @@ import { cp, mkdir, mkdtemp, rm, stat, symlink, utimes } from "node:fs/promises"
 import { resolve } from "node:path";
 
 test.skipIf(!process.env.LENSO_RUNTIME_ROOT)(
+  "candidate proof rejects altered binary bytes and altered source inventory without fallback",
+  async () => {
+    const runtime = await import(resolve(process.env.LENSO_RUNTIME_ROOT!, "scripts/local.ts"));
+    const rustRoot = resolve(import.meta.dir, "..");
+    await mkdir(resolve(rustRoot, "target"), { recursive: true });
+    const fixture = await mkdtemp(resolve(rustRoot, "target/proof-test-"));
+    const binary = resolve(fixture, "binary");
+    try {
+      await Bun.write(binary, "owned test binary");
+      await runtime.recordBinary(binary, 12);
+      expect(await runtime.verifyBinary(binary)).toBe(12);
+      expect(typeof (await runtime.candidateFiles())["tsconfig.json"]).toBe("string");
+      expect(typeof (await runtime.candidateFiles(rustRoot, true))["crates/plugin-core/README.md"]).toBe("string");
+      const proof = await Bun.file(`${binary}.source.json`).text();
+      expect(proof).not.toContain(process.env.LENSO_RUNTIME_ROOT!);
+      await expect(runtime.verifyBinary(binary, undefined, "release")).rejects.toThrow("Binary candidate mismatch");
+      await Bun.write(binary, "changed binary");
+      await expect(runtime.verifyBinary(binary)).rejects.toThrow("Binary candidate mismatch");
+      await Bun.write(binary, "owned test binary");
+      const changed = JSON.parse(proof);
+      changed.files["tools/generate.ts"] = "0".repeat(64);
+      await Bun.write(`${binary}.source.json`, JSON.stringify(changed));
+      await expect(runtime.verifyBinary(binary)).rejects.toThrow("Binary candidate mismatch");
+    } finally {
+      await rm(fixture, { recursive: true, force: true });
+    }
+  },
+);
+
+test.skipIf(!process.env.LENSO_RUNTIME_ROOT)(
   "failed generation remains invalid on retry and a restored contract recovers without touching source locks",
   async () => {
     const runtimeRoot = resolve(process.env.LENSO_RUNTIME_ROOT!);
@@ -19,7 +49,7 @@ test.skipIf(!process.env.LENSO_RUNTIME_ROOT)(
           recursive: true,
           preserveTimestamps: true,
         });
-      for (const path of ["Cargo.toml", "crates", "sdk", "tools"])
+      for (const path of ["Cargo.toml", "Cargo.lock", "bun.lock", "package.json", "tsconfig.json", "crates", "sdk", "tools", "scripts"])
         await symlink(resolve(runtimeRoot, path), resolve(runtime, path));
       await mkdir(resolve(runtime, "examples/contracts"), { recursive: true });
       const canonical = resolve(runtimeRoot, "examples/contracts/logs.json");
@@ -50,6 +80,7 @@ test.skipIf(!process.env.LENSO_RUNTIME_ROOT)(
       const hash = async () =>
         new Bun.CryptoHasher("sha256").update(await Bun.file(binary).arrayBuffer()).digest("hex");
       const before = await hash();
+      const proofBefore = await Bun.file(`${binary}.source.json`).text();
       const invalid = await Bun.file(contract).json();
       invalid.methods.aggregate.input.format = "unsupported";
       await Bun.write(contract, JSON.stringify(invalid));
@@ -58,6 +89,7 @@ test.skipIf(!process.env.LENSO_RUNTIME_ROOT)(
         expect(result.code).not.toBe(0);
         expect(result.output).toContain("unsupported schema keyword: format");
         expect(await hash()).toBe(before);
+        expect(await Bun.file(`${binary}.source.json`).text()).toBe(proofBefore);
       }
       await cp(canonical, contract);
       expect((await build()).code).toBe(0);

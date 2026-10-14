@@ -108,17 +108,24 @@ pub async fn start_runtime_app(
         }
     }
     let (mut sender, receiver) = tokio::sync::oneshot::channel();
-    // Core setup is not cancellation-safe. Own the entire startup in one task;
-    // if its caller disappears, finish setup and shut down instead of abandoning it.
+    let (acknowledge, acknowledged) = tokio::sync::oneshot::channel();
+    // Own activation as well as setup; cancellation must clean up an undelivered App.
     tokio::spawn(async move {
         let result = start_and_activate(app, exports, &mut sender).await;
-        if let Err(Ok(running)) = sender.send(result) {
-            let _ = running.shutdown().await;
+        let running = result.as_ref().ok().cloned();
+        let delivered = sender.send(result).is_ok();
+        if let Some(running) = running {
+            if !delivered || acknowledged.await.is_err() {
+                let _ = running.shutdown().await;
+            }
         }
     });
-    receiver
+    let result = receiver
         .await
-        .map_err(|_| Box::new(RuntimeError::new("connection_lost")) as BoxError)?
+        .map_err(|_| Box::new(RuntimeError::new("connection_lost")) as BoxError)?;
+    // No await may separate receiving the App from acknowledging its ownership.
+    let _ = acknowledge.send(());
+    result
 }
 
 async fn start_and_activate(
@@ -135,7 +142,10 @@ async fn start_and_activate(
         let mut bindings = Vec::with_capacity(exports.len());
         for export in exports {
             let host = running.get(&export.handle)?;
-            let handlers = (export.factory)(&running)?;
+            let handlers = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                (export.factory)(&running)
+            }))
+            .map_err(|_| Box::new(RuntimeError::new("activation_panicked")) as BoxError)??;
             host.validate_handlers(&handlers)?;
             bindings.push((host, handlers));
         }

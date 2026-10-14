@@ -5,6 +5,28 @@ const source = process.argv[2];
 const destination = process.argv[3];
 if (!source || !destination) throw new Error("Pass native source and owned staging roots.");
 
+if (source === "--candidate" || source === "--record") {
+  const runtime = await import(resolve(destination, "scripts/local.ts"));
+  const path = process.argv[4]!;
+  if (source === "--candidate") {
+    await Bun.write(path, JSON.stringify({
+      files: await runtime.candidateFiles(destination),
+      native_files: await runtime.candidateFiles(process.argv[5]!, true),
+      started: Date.now(),
+    }));
+  } else {
+    const before = await Bun.file(process.argv[5]!).json();
+    if (JSON.stringify(before.files) !== JSON.stringify(await runtime.candidateFiles(destination)))
+      throw new Error("Runtime source changed during native build");
+    if (JSON.stringify(before.native_files) !== JSON.stringify(await runtime.candidateFiles(process.argv[6]!, true)))
+      throw new Error("Native source changed during build");
+    await runtime.recordBinary(path, Date.now() - before.started, before.files, process.argv[7]);
+    const proof = await Bun.file(`${path}.source.json`).json();
+    await Bun.write(`${path}.source.json`, JSON.stringify({ ...proof, native_files: before.native_files }, null, 2) + "\n");
+  }
+  process.exit(0);
+}
+
 async function syncFile(from: string, to: string) {
   const bytes = await readFile(from);
   const previous = await readFile(to).catch((error: NodeJS.ErrnoException) => {
