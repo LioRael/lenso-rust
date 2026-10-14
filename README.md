@@ -111,6 +111,36 @@ verify the formal Git pin. Do not commit the override or a candidate-resolved
 lockfile. Run `cargo update -p runtime-sdk` without the override and repeat the
 locked build/tests to return to the formal pinned SDK.
 
+For repeatable local **development builds**, use the staged builder instead of
+altering the checkout's lockfile:
+
+```sh
+sh scripts/build-runtime.sh --runtime-root "$LENSO_RUNTIME_ROOT" --out target/debug/logs-batch
+sh scripts/build-runtime.sh --runtime-root "$LENSO_RUNTIME_ROOT" --out target/debug/logs-client --bin logs-client
+```
+
+It requires Bun, Cargo and POSIX shell. Only the owned
+`target/.lenso/runtime-rust-stage` receives the local Git-source override and
+Runtime-generated contract/bindings. Unchanged source timestamps and target
+artifacts remain reusable; deleted source files are removed from that stage.
+Staging compares file contents, not size/second-resolution mtimes, so rapid or
+same-size source changes cannot silently reuse an old Cargo build. Source trees
+must contain regular files/directories; this example builder rejects symlinks.
+The repository's manifest, formal dependency pin and `Cargo.lock` stay unchanged.
+Successful builds atomically copy the executable to `--out`; failed builds leave
+the prior executable intact. `--target-dir` selects the Cargo artifact cache;
+`--release --out target/release/logs-batch` builds the measured optimized binary.
+No npm/crates release is involved.
+
+The serving App accepts `LENSO_RUNTIME_INSTANCE` or `LENSO_WORKSPACE_INSTANCE`
+for exact candidate readiness, and `LENSO_RUNTIME_SERVICE` (default `batch`).
+SIGTERM awaits native shutdown, including Runtime drain. Initialization emits
+actual instance/version/elapsed metadata; `LENSO_PERF_TIMING=1` enables bounded
+benchmark collection of per-request business compute time through structured
+stderr (no input payloads). The TS Engine workspace owns build/watch/cutover;
+this App retains ownership of native resources. Windows staging/signal behavior
+has not been verified.
+
 ## Lifecycle and trust boundaries
 
 Native plugins are trusted, statically linked Rust code with the process's

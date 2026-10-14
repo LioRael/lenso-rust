@@ -22,6 +22,8 @@ async fn aggregate_native(
             duration_ms: log.duration_ms,
         })
         .collect();
+    let timing = std::env::var("LENSO_PERF_TIMING").as_deref() == Ok("1");
+    let business_started = std::time::Instant::now();
     let result = service
         .aggregate_records_with_cancellation(&records, || context.cancellation.is_cancelled())
         .map_err(|error| {
@@ -29,6 +31,15 @@ async fn aggregate_native(
                 reason: error.reason,
             })
         })?;
+    if timing {
+        eprintln!(
+            "{}",
+            serde_json::json!({
+                "event":"aggregate_completed",
+                "business_ms":business_started.elapsed().as_secs_f64() * 1000.0
+            })
+        );
+    }
     Ok(AggregateOutput {
         count: result.count,
         error_count: result.error_count,
@@ -78,21 +89,30 @@ async fn progress(
 }
 #[tokio::main]
 async fn main() -> Result<(), BoxError> {
+    let initialization_started = std::time::Instant::now();
     let port = std::env::var("LENSO_RUNTIME_PORT")
         .unwrap_or_else(|_| "7331".into())
         .parse()?;
+    let instance = std::env::var("LENSO_RUNTIME_INSTANCE")
+        .or_else(|_| std::env::var("LENSO_WORKSPACE_INSTANCE"))
+        .unwrap_or_else(|_| "rust-one".into());
+    let service = std::env::var("LENSO_RUNTIME_SERVICE").unwrap_or_else(|_| "batch".into());
+    let diagnostics = std::env::var_os("LENSO_RUNTIME_DIAGNOSTICS").is_some();
+    let mut initialization_count = 0;
     let source = Instance::new("logs-source", MemoryLogSource::default());
+    initialization_count += 1;
     let aggregation = Instance::new(
         "aggregation",
         LogAggregationPlugin::new(source.handle(), AggregateConfig::default()),
     );
+    initialization_count += 1;
     let runtime = Instance::new(
         "runtime",
         RuntimePlugin::new(
             HostOptions {
                 namespace: "demo".into(),
-                service: "batch".into(),
-                instance: "rust-one".into(),
+                service: service.clone(),
+                instance: instance.clone(),
                 port,
                 contract: serde_json::from_str(include_str!("../../contracts/logs.json"))?,
                 max_concurrency: 8,
@@ -100,6 +120,7 @@ async fn main() -> Result<(), BoxError> {
             5000,
         ),
     );
+    initialization_count += 1;
     let aggregation_handle = aggregation.handle();
     let export = RuntimeExport::new(runtime.handle(), move |running| {
         let service = running.get(&aggregation_handle)?;
@@ -110,10 +131,26 @@ async fn main() -> Result<(), BoxError> {
     });
     let app = App::new().with(source).with(aggregation).with(runtime);
     let running = start_runtime_app(app, vec![export]).await?;
+    let initialization_elapsed_ms = initialization_started.elapsed().as_millis();
     eprintln!(
         "{}",
-        serde_json::json!({"event":"service_ready","namespace":"demo","service":"batch","port":port})
+        serde_json::json!({
+            "event":"service_ready",
+            "namespace":"demo",
+            "service":service,
+            "instance":instance,
+            "version":contract().get("version").and_then(serde_json::Value::as_str),
+            "port":port,
+            "initialization_elapsed_ms":initialization_elapsed_ms,
+            "plugin_instance_count":initialization_count
+        })
     );
+    if diagnostics {
+        eprintln!(
+            "{}",
+            serde_json::json!({"event":"initialization_complete","plugin_instance_count":initialization_count,"elapsed_ms":initialization_elapsed_ms})
+        );
+    }
     #[cfg(unix)]
     {
         let mut terminate =
