@@ -1,0 +1,17 @@
+[package]
+name = "lenso-realtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Bounded process-local resource subscriptions with explicit authorization leases"
+
+[dependencies]
+lenso-plugin-core.workspace = true
+tokio.workspace = true
+serde = { workspace = true, features = ["rc"] }
+serde_json.workspace = true
+thiserror.workspace = true
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

@@ -1,0 +1,20 @@
+[package]
+name = "lenso-audit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Scoped append-only audit services with explicit authority and repository boundaries"
+
+[features]
+default = ["plugin"]
+plugin = ["dep:lenso-plugin-core"]
+
+[dependencies]
+lenso-plugin-core = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio.workspace = true
+
+[[example]]
+name = "audit-plugin"
+required-features = ["plugin"]

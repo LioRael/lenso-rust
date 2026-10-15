@@ -4,6 +4,11 @@ members = [
     "crates/log-plugins",
     "crates/log",
     "crates/cache",
+    "crates/authorization",
+    "crates/audit",
+    "crates/storage",
+    "crates/realtime",
+    "crates/limits",
     "crates/plugin-runtime",
     "examples/batch",
 ]
