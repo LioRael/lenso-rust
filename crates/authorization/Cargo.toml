@@ -1,0 +1,25 @@
+[package]
+name = "lenso-authorization"
+version.workspace = true
+edition.workspace = true
+rust-version = "1.80"
+license.workspace = true
+description = "Decisions over trusted facts, exact-scope RBAC, and optional Lenso lifecycle wiring"
+
+[features]
+default = ["plugin"]
+plugin = ["dep:lenso-plugin-core"]
+
+[dependencies]
+lenso-plugin-core = { workspace = true, optional = true }
+tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+serde_json.workspace = true
+thiserror.workspace = true
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "test-util"] }
+
+[[example]]
+name = "injected"
+required-features = ["plugin"]

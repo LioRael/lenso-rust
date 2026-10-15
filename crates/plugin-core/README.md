@@ -124,7 +124,7 @@ Every callback is awaited; errors and callback panics are collected without
 skipping later callbacks. Startup preserves both its original error and rollback
 errors.
 
-`on_cleanup` returns an optional `CleanupHandle`. Its `dispose().await` supports
+`on_cleanup` returns a `CleanupHandle`; using it for early disposal is optional. Its `dispose().await` supports
 explicit early disposal and joins the same callback completion as rollback and
 shutdown. Failed early disposal remains visible in rollback/shutdown; cancelling
 a disposer waiter does not cancel its owned cleanup task. Plugins must coordinate
