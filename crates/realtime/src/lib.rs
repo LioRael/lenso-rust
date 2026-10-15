@@ -153,11 +153,11 @@ impl<P: Send + Sync + 'static> MemoryRealtime<P> {
         let mut enqueued = HashMap::<u64, usize>::new();
         let mut overflowed = HashSet::new();
         for (connection, id) in listeners {
-            if !state
+            if state
                 .connections
                 .get(&connection)
                 .and_then(|c| c.subscriptions.get(&id))
-                .is_some_and(|s| s.valid_until.is_some())
+                .is_none_or(|s| s.valid_until.is_none())
             {
                 continue;
             }
