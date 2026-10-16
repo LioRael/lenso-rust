@@ -1,0 +1,66 @@
+.gitignore
+  h_9d56aba080c170 1-3
+Cargo.lock
+  h_9d56aba080c170 1-288
+Cargo.toml
+  h_9d56aba080c170 1-23
+README.md
+  h_9d56aba080c170 1-142
+crates/log-plugins/Cargo.toml
+  h_9d56aba080c170 1-13
+crates/log-plugins/examples/data/api.jsonl
+  h_9d56aba080c170 1-3
+crates/log-plugins/examples/data/jobs.jsonl
+  h_9d56aba080c170 1-2
+crates/log-plugins/examples/offline.rs
+  h_9d56aba080c170 1-50
+crates/log-plugins/src/aggregate.rs
+  h_9d56aba080c170 1-92
+crates/log-plugins/src/lib.rs
+  h_9d56aba080c170 1-13
+crates/log-plugins/src/plugins.rs
+  h_9d56aba080c170 1-153
+crates/log-plugins/src/source.rs
+  h_9d56aba080c170 1-125
+crates/log-plugins/tests/data/malformed.jsonl
+  h_9d56aba080c170 1-3
+crates/log-plugins/tests/data/missing-field.jsonl
+  h_9d56aba080c170 1
+crates/log-plugins/tests/logs.rs
+  h_9d56aba080c170 1-249
+crates/plugin-core/Cargo.toml
+  h_9d56aba080c170 1-14
+crates/plugin-core/README.md
+  h_9d56aba080c170 1-102
+crates/plugin-core/src/lib.rs
+  h_9d56aba080c170 1-485
+crates/plugin-core/tests/lifecycle.rs
+  h_9d56aba080c170 1-351
+crates/plugin-runtime/Cargo.toml
+  h_9d56aba080c170 1-13
+crates/plugin-runtime/src/lib.rs
+  h_9d56aba080c170 1-160
+crates/plugin-runtime/tests/lifecycle.rs
+  h_9d56aba080c170 1-276
+examples/batch/Cargo.toml
+  h_9d56aba080c170 1-13
+examples/batch/src/bin/logs-client.rs
+  h_9d56aba080c170 1-86
+examples/batch/src/main.rs
+  h_9d56aba080c170 1-203
+examples/contracts/logs.json
+  h_9d56aba080c170 1-67
+examples/generated/logs.rs
+  h_9d56aba080c170 1-105
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c7cbc9a609188cd218b6ed61879d41e0623556b1",
+  "prompts": {},
+  "humans": {
+    "h_9d56aba080c170": {
+      "author": "LioRael <leo@lenso.dev>"
+    }
+  }
+}
