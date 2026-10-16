@@ -137,7 +137,8 @@ resolution is reproducible, and output/resource ownership is verified.
 
 Recheck destination policy. Publish the final candidate to a unique ref when
 required for CI or a PR, matching the repository's actual workflow triggers.
-Native checks run for pull requests and main pushes; a source-branch push alone does not start them.
+Native checks run for pull requests, main pushes and `v*` tags; a source-branch
+push alone does not start them.
 The manual cross-repository job also needs exact trusted Runtime/TS refs.
 Verify required CI using the full SHA, ref, workflow, event, run attempt and
 successful job conclusions. Satisfy required reviews and signatures on that
