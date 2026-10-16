@@ -5,6 +5,7 @@ user-invocable: true
 disable-model-invocation: true
 metadata:
   delta-action: land
+  internal: true
 ---
 
 # Land Lenso Rust changes
@@ -81,13 +82,22 @@ For native implementation, adapter or example changes, verify the formal
 dependency resolution:
 
 ```sh
-cargo fetch --locked
-cargo build --workspace --locked
 cargo test --workspace --locked
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo fmt --all --check
 cargo run --locked -p lenso-log-plugins --example offline
 ```
+
+`cargo test` resolves locked dependencies and compiles the workspace, so do not
+prepend a separate fetch/build unless diagnosing resolution or producing an
+artifact that tests do not build. Start with the affected crate's tests during
+iteration; run the workspace checks above for the final native candidate.
+
+Reuse successful evidence only for the same full candidate SHA, unchanged tree,
+lockfile, toolchain/features/profile, commands and relevant companion revisions.
+Record the run URL/attempt or local receipt. A different integration tree, dirty
+source or changed Runtime/TS ref requires affected verification again. Reusing
+local evidence never substitutes for required hosting checks.
 
 Record lockfile hashes before and after checks. If dependency updates are in
 scope, synchronize only their necessary resolutions on the candidate, review
@@ -127,6 +137,9 @@ resolution is reproducible, and output/resource ownership is verified.
 
 Recheck destination policy. Publish the final candidate to a unique ref when
 required for CI or a PR, matching the repository's actual workflow triggers.
+Native checks run for pull requests, main pushes and `v*` tags; a source-branch
+push alone does not start them.
+The manual cross-repository job also needs exact trusted Runtime/TS refs.
 Verify required CI using the full SHA, ref, workflow, event, run attempt and
 successful job conclusions. Satisfy required reviews and signatures on that
 revision; infer no check names from the TypeScript or Runtime repositories.

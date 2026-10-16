@@ -244,7 +244,7 @@ async fn fenced_tasks_still_consume_capacity_and_close_settles_their_waiters() {
 }
 
 #[tokio::test]
-async fn loader_errors_are_sanitized_with_explicit_cause_and_panics_settle() {
+async fn loader_errors_are_sanitized_with_explicit_cause() {
     let cache = cache();
     let error = cache
         .get_or_set(
@@ -257,26 +257,6 @@ async fn loader_errors_are_sanitized_with_explicit_cause_and_panics_settle() {
     assert!(!format!("{error:?} {error}").contains("private"));
     assert!(error.source().is_none());
     assert_eq!(error.loader_cause().unwrap().to_string(), "private data");
-    let error = cache
-        .get_or_set(
-            "k",
-            || async {
-                panic!("private panic payload");
-                #[allow(unreachable_code)]
-                value("no").await
-            },
-            None,
-        )
-        .await
-        .unwrap_err();
-    assert!(matches!(error, CacheError::LoaderPanicked));
-    assert_eq!(
-        cache
-            .get_or_set("k", || value("retry"), None)
-            .await
-            .unwrap(),
-        "retry"
-    );
     cache.close().await.unwrap();
 }
 
@@ -350,6 +330,13 @@ async fn panic_settles_all_coalesced_waiters() {
     finish.send(()).unwrap();
     assert!(matches!(first.await, Err(CacheError::LoaderPanicked)));
     assert!(matches!(second.await, Err(CacheError::LoaderPanicked)));
+    assert_eq!(
+        child
+            .get_or_set("k", || value("retry"), None)
+            .await
+            .unwrap(),
+        "retry"
+    );
     cache.close().await.unwrap();
 }
 
