@@ -1,0 +1,24 @@
+.agents/skills/land/SKILL.md
+  h_9d56aba080c170 1-157
+README.md
+  h_9d56aba080c170 114-143
+examples/batch/src/main.rs
+  h_9d56aba080c170 25-26,34-42,92,96-101,103,108,114-115,123,134,137-146,148-153
+scripts/build-runtime.sh
+  h_9d56aba080c170 1-89
+scripts/build-runtime.test.ts
+  h_9d56aba080c170 1-84
+scripts/stage-native.ts
+  h_9d56aba080c170 1-39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2abf4ae5af18d8e1699816d4c31e779685a88197",
+  "prompts": {},
+  "humans": {
+    "h_9d56aba080c170": {
+      "author": "LioRael <leo@lenso.dev>"
+    }
+  }
+}
