@@ -10,6 +10,10 @@ Native Rust plugin composition and applications. This repository owns:
   subscribers, redaction and explicit owned flush.
 - `crates/cache` (`lenso-cache`): typed bounded memory, finite TTL, exact
   invalidation and cancellation-safe shared loads.
+- `crates/mcp` (`lenso-mcp`): borrowed native tool projection with stable names,
+  scoped pagination, structured results, cancellation/drain and official-SDK
+  stdio transport. See its
+  [scope and host integration boundary](crates/mcp/README.md).
 - `crates/plugin-runtime` (`lenso-plugin-runtime`): optional Runtime connection
   injection and explicit post-setup exports.
 - `examples/batch`: the native serving App (`logs-batch`) and generated-client
@@ -27,7 +31,8 @@ only selected business exports use Runtime.
 ## Build and offline usage
 
 Use Rust/Cargo. The generated batch bindings use `std::sync::LazyLock`, requiring
-Rust 1.80 or newer for the full workspace. Core declares a Rust 1.77 minimum,
+Rust 1.80 or newer for the batch bindings; MCP's default stdio feature requires
+Rust 1.88 or newer. Core declares a Rust 1.77 minimum,
 matching the locked `thiserror` dependency.
 
 ```sh

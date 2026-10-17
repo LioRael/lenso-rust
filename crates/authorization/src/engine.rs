@@ -146,7 +146,8 @@ pub struct AuthorizationOptions {
     pub attributes: Option<Arc<dyn AttributeResolver>>,
     pub resolve_resource: Option<Arc<dyn ResourceResolver>>,
     pub timeout: Duration,
-    /// Unix milliseconds. Invoked once per check, inside the failure boundary.
+    /// Unix milliseconds. Read for the snapshot, and again before an expiring
+    /// credential/session can return allow; always inside the failure boundary.
     pub clock: Arc<dyn Fn() -> Result<u64, EvaluationError> + Send + Sync>,
     pub observe: Option<Arc<dyn Observer>>,
     pub explain: Option<ExplainGate>,
@@ -284,6 +285,21 @@ impl Authorization {
         Ok(self.evaluate(target, cancellation).await)
     }
     async fn evaluate(&self, request: Request, caller: Cancellation) -> Explanation {
+        self.evaluate_with(request, caller, |request, _| async {
+            Ok(Some((request, None)))
+        })
+        .await
+    }
+    pub(crate) async fn evaluate_with<F, Fut>(
+        &self,
+        request: Request,
+        caller: Cancellation,
+        prepare: F,
+    ) -> Explanation
+    where
+        F: FnOnce(Request, Evaluation) -> Fut,
+        Fut: std::future::Future<Output = Result<Option<(Request, Option<u64>)>, EvaluationError>>,
+    {
         let started = Instant::now();
         let cancellation = Cancellation::default();
         let _finish = CancelOnDrop(cancellation.clone());
@@ -306,7 +322,34 @@ impl Authorization {
                 now,
                 cancellation: cancellation.clone(),
             };
-            self.work(request, &evaluation).await
+            let Some((request, session_expiry)) = prepare(request, evaluation.clone()).await?
+            else {
+                return Ok(failure(ReasonCode::BoundaryDenied));
+            };
+            evaluation.ensure_active()?;
+            if !request.valid() {
+                return Err(EvaluationError);
+            }
+            let expiry = session_expiry
+                .into_iter()
+                .chain(request.credential.as_ref().and_then(|c| c.expires_at))
+                .min();
+            if expiry.is_some_and(|expiry| expiry <= now) {
+                return Ok(failure(ReasonCode::BoundaryDenied));
+            }
+            let result = self.work(request, &evaluation).await?;
+            if result.decision.is_allowed() {
+                if let Some(expiry) = expiry {
+                    let finished_at = (self.0.clock)()?;
+                    if finished_at < now {
+                        return Err(EvaluationError);
+                    }
+                    if expiry <= finished_at {
+                        return Ok(failure(ReasonCode::BoundaryDenied));
+                    }
+                }
+            }
+            Ok(result)
         })
         .catch_unwind();
         tokio::pin!(work);
