@@ -1,10 +1,11 @@
 # Native MCP tools
 
-`lenso-mcp` projects an explicit, immutable selection of ordinary native service
+`lenso-mcp` projects an explicit selection of ordinary native service
 callbacks into serializable MCP `ToolPage` / `CallToolResult` values. It borrows
 trusted host identity and never starts listeners, loads credentials or owns the
-application. This is an adapter for a host's MCP implementation, not a complete
-MCP server or a replacement for SDK negotiation/framing.
+application. The default `stdio` feature adds a real server using official `rmcp` 3.5.0
+(exactly pinned, Rust 1.88+). The SDK owns initialize negotiation, messages
+and cancellation. `--no-default-features` retains the native projection alone.
 
 See `examples/mock.rs` for a local JSON protocol projection with no network.
 
@@ -50,11 +51,55 @@ Default budgets match the TS borrowed adapter: input/catalog 256 KiB, output
 callbacks. The host must bound incoming frames before parsing and total outgoing
 frames including envelopes. Tokio must stay alive through drain.
 
-Dynamic tool registration, list-change notifications, HTTP/stdio framing,
-initialize/negotiation, tasks, prompts, resources, progress, durable cancellation,
-and Engine conversion are deliberately outside this native projection. Selection
-changes require a new adapter, as with the current TS borrowed selection. For
+HTTP, tasks, prompts, resources, progress, durable cancellation and Engine
+conversion remain outside this plugin. For
 exact-instance native injection, construct an adapter from a plugin's `setup`,
 resolve dependencies through `Setup::get`, pass `setup.work_gate()`, then register
 `adapter.stop()` immediately in Entrances. `McpPlugin` is the simpler convenience
 for callbacks borrowing already host-owned services.
+
+## Real stdio entry
+
+```sh
+cargo build -p lenso-mcp --bin lenso-mcp-demo --locked
+# Configure an MCP client to launch the resulting absolute executable path:
+# /absolute/checkout/target/debug/lenso-mcp-demo
+```
+
+The demo is an actual standalone stdio server exposing synthetic echo/wait tools;
+it performs no login, credential creation, network request or model invocation.
+For application use, inject your own adapter and trusted local identity:
+
+```rust,ignore
+let server = lenso_mcp::stdio::McpServer::new(adapter.clone(), trusted_identity);
+server.run_stdio(shutdown_token).await?;
+```
+
+Initialize negotiates the SDK-supported legacy revisions 2025-11-25,
+2025-03-26 or 2024-11-05. Only tools/list_changed capability is advertised.
+Incoming frames use the SDK codec with a fixed 1 MiB limit; invalid frames close
+the entry. Initialization times out after 30 seconds. EOF, Ctrl-C (demo), explicit
+shutdown or runner drop seals adapter admission and signals active work. Normal
+runner completion drains actual work; dropping a runner cannot await cleanup, so
+its application owner must still await app shutdown. Keep Tokio alive through drain.
+The SDK may suppress responses to cancelled requests; cancellation completion is
+not evidence of rollback. The native adapter still retains accepted work guards.
+
+Each McpServer owns one session and one trusted identity. Use a fresh server per
+entry. All application logs must use stderr; stdout belongs to SDK frames.
+The bridge does not intercept process-global logging or sandbox trusted callbacks.
+
+`McpServer::replace_operations(new_selection).await` is a trusted host lifecycle
+operation, never an MCP tool. Resolve the exact initialized service instances in
+host setup before publishing callbacks. Replacement validates the whole catalog,
+invalidates all prior cursors (including same-name schema changes), and sends the
+SDK list-change notification after initialization. Already running callbacks keep
+their original closure and WorkGuard until they settle; replacement does not free
+borrowed services. If notification delivery fails, the valid new catalog remains
+installed and the host should restart that session. The lower-level adapter method
+performs atomic replacement without notifications for hosts owning their own entry.
+
+Acceptance: `cargo test -p lenso-mcp --test stdio --locked` launches the actual
+binary through pipes with the official SDK client. A second SDK session exercises
+host-driven replacement and cooperative cancellation/drain over local duplex pipes.
+No protocol parsing or dispatch code is duplicated in the plugin.

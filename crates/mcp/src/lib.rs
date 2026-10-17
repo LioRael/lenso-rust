@@ -21,6 +21,9 @@ use std::{
 use tokio::sync::{oneshot, watch};
 pub use tokio_util::sync::CancellationToken;
 
+#[cfg(feature = "stdio")]
+pub mod stdio;
+
 type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 type Handler<I> =
     dyn Fn(Value, RequestContext<I>) -> BoxFuture<Result<Value, ToolError>> + Send + Sync;
@@ -298,6 +301,8 @@ struct Cursor<I> {
     expires: Instant,
 }
 struct State<I> {
+    operations: Arc<Vec<Operation<I>>>,
+    catalog_version: u64,
     closed: bool,
     active: usize,
     next_cursor: u64,
@@ -305,7 +310,6 @@ struct State<I> {
 }
 struct Inner<I> {
     config: McpConfig,
-    operations: Vec<Operation<I>>,
     policies: Policies<I>,
     gate: WorkGate,
     state: Mutex<State<I>>,
@@ -342,10 +346,11 @@ impl<I: Send + Sync + 'static> McpAdapter<I> {
         let (active, _) = watch::channel(0);
         Ok(Self(Arc::new(Inner {
             config,
-            operations,
             policies,
             gate,
             state: Mutex::new(State {
+                operations: Arc::new(operations),
+                catalog_version: 0,
                 closed: false,
                 active: 0,
                 next_cursor: 0,
@@ -434,20 +439,21 @@ impl<I: Send + Sync + 'static> McpAdapter<I> {
         input: Value,
         context: RequestContext<I>,
     ) -> Result<CallToolResult, ProtocolError> {
-        let operation = self
-            .0
-            .operations
-            .iter()
-            .find(|o| o.tool.name == name)
-            .ok_or(ProtocolError::InvalidParams)?;
+        let (handler, tool) = {
+            let state = self.0.state.lock().unwrap();
+            let operation = state
+                .operations
+                .iter()
+                .find(|o| o.tool.name == name)
+                .ok_or(ProtocolError::InvalidParams)?;
+            (operation.handler.clone(), operation.tool.clone())
+        };
         if input.to_string().len() > self.0.config.max_input_bytes {
             return Ok(CallToolResult::failure(ToolError::InputTooLarge));
         }
         if !input.is_object() {
             return Ok(CallToolResult::failure(ToolError::InvalidInput));
         }
-        let handler = operation.handler.clone();
-        let tool = operation.tool.clone();
         let inner = self.0.clone();
         let result = self
             .tracked(context, move |context| async move {
@@ -474,8 +480,12 @@ impl<I: Send + Sync + 'static> McpAdapter<I> {
     ) -> Result<ToolPage, ProtocolError> {
         let inner = self.0.clone();
         self.tracked(context, move |context| async move {
+            let (operations, version) = {
+                let state = inner.state.lock().unwrap();
+                (state.operations.clone(), state.catalog_version)
+            };
             let mut visible = Vec::new();
-            for operation in &inner.operations {
+            for operation in operations.iter() {
                 if (inner.policies.visible)(operation.tool.clone(), context.clone()).await? {
                     visible.push(operation.tool.clone());
                 }
@@ -483,7 +493,13 @@ impl<I: Send + Sync + 'static> McpAdapter<I> {
                     return Err(ToolError::Cancelled);
                 }
             }
-            Ok(make_page(&inner, &context.identity, visible, cursor))
+            Ok(make_page(
+                &inner,
+                &context.identity,
+                visible,
+                cursor,
+                version,
+            ))
         })
         .await
         .map_err(|e| match e {
@@ -491,6 +507,22 @@ impl<I: Send + Sync + 'static> McpAdapter<I> {
             ToolError::Busy => ProtocolError::Busy,
             _ => ProtocolError::Discovery,
         })?
+    }
+    /// Trusted host lifecycle operation. Validate before atomically replacing the
+    /// catalog; admitted calls keep their original handler and work guard.
+    pub fn replace_operations(&self, operations: Vec<Operation<I>>) -> Result<(), ProtocolError> {
+        validate_catalog(&self.0.config, &operations)?;
+        let mut state = self.0.state.lock().unwrap();
+        if state.closed {
+            return Err(ProtocolError::Closed);
+        }
+        state.catalog_version = state
+            .catalog_version
+            .checked_add(1)
+            .ok_or(ProtocolError::Configuration)?;
+        state.operations = Arc::new(operations);
+        state.cursors.clear();
+        Ok(())
     }
     /// Seal admission and signal all work; registered entrance cleanup uses this
     /// before Core drains WorkGuards. It is safe to call repeatedly.
@@ -541,12 +573,16 @@ fn make_page<I>(
     identity: &Arc<I>,
     visible: Vec<Tool>,
     cursor: Option<String>,
+    version: u64,
 ) -> Result<ToolPage, ProtocolError> {
     let now = Instant::now();
     let names: Vec<_> = visible.iter().map(|t| t.name.clone()).collect();
     let mut state = inner.state.lock().unwrap();
     if state.closed {
         return Err(ProtocolError::Closed);
+    }
+    if state.catalog_version != version {
+        return Err(ProtocolError::InvalidParams);
     }
     state.cursors.retain(|_, c| c.expires > now);
     let old = cursor

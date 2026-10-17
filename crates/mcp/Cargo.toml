@@ -5,7 +5,17 @@ edition.workspace = true
 license.workspace = true
 description = "Borrowed native MCP tool adapter with bounded discovery and draining cancellation"
 
+[features]
+default = ["stdio"]
+stdio = ["dep:rmcp"]
+
+[[bin]]
+name = "lenso-mcp-demo"
+path = "src/bin/demo.rs"
+required-features = ["stdio"]
+
 [dependencies]
+rmcp = { version = "=3.5.0", default-features = false, features = ["server", "transport-io"], optional = true }
 lenso-plugin-core.workspace = true
 tokio.workspace = true
 serde.workspace = true
@@ -17,4 +27,5 @@ tokio-util = { version = "0.7", features = ["rt"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["test-util"] }
+rmcp = { version = "=3.5.0", default-features = false, features = ["client"] }
+tokio = { workspace = true, features = ["test-util", "process"] }

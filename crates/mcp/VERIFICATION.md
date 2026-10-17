@@ -78,3 +78,38 @@ initialize negotiation, dynamic list-change notifications or schema conversion.
 Those require a separate host transport integration. No full MCP server or
 production authentication readiness is claimed. See README for validator,
 identity Arc, output redaction and noncooperative drain limits.
+
+## Real stdio follow-up (supersedes projection-only transport limits above)
+
+The follow-up pins official `rmcp` **3.5.0**, default features off, enabling only
+server/stdio support in production and client support in tests. SDK source and
+[official repository](https://github.com/modelcontextprotocol/rust-sdk) were
+checked; no protocol stack was copied. `stdio` is default-enabled and can be
+removed for projection-only builds. This feature requires Rust 1.88+.
+
+`McpServer::run_stdio` serves actual SDK initialize/tools/list/tools/call and
+request cancellation over stdin/stdout. SDK codec limits incoming frames to
+1 MiB. EOF/error and explicit shutdown signal native work before SDK drain;
+normal completion waits for actual work. The dedicated `lenso-mcp-demo` binary
+also handles Ctrl-C and Unix SIGTERM and writes no application data to stdout.
+Supported negotiated revisions are 2025-11-25, 2025-03-26 and 2024-11-05.
+
+Trusted host catalog replacement validates before swapping, clears old cursors,
+keeps running callback lifetimes, and emits SDK list-change notifications after
+initialization. This is not a public registration tool or hot-unload mechanism.
+The host still owns initialized service dependencies and resource lifetimes.
+
+Executed `cargo test -p lenso-mcp --locked --offline`: **8 tests passed**,
+including an actual official-client→server-child stdio initialize, discovery,
+structured echo, invalid business input, unknown name, cancellation and a
+successful subsequent echo. Another official SDK session over duplex pipes
+verified notification, replacement discovery, rejected old names/stale cursors,
+cooperative cancellation reaching the service, and drain awaiting settlement.
+No network server, auth provider, credentials or model were involved.
+
+`cargo clippy -p lenso-mcp --all-targets --all-features --locked --offline -- -D warnings`
+also passed. The additional SDK dependencies are recorded in Cargo.lock; the
+formal Runtime pin remains unchanged. HTTP, newer stateless protocol behavior,
+resources, prompts, tasks, durable cancellation and OAuth remain unimplemented.
+The earlier text stating that stdio/SDK interoperability/dynamic notifications
+were unimplemented describes commit 1bd6bcd only, not this follow-up.
