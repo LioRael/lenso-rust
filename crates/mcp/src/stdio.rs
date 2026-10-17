@@ -162,6 +162,10 @@ impl<I: Send + Sync + 'static> ServerHandler for McpServer<I> {
                 .enable_tool_list_changed()
                 .build(),
         )
+        .with_server_info(rmcp::model::Implementation::new(
+            "lenso-mcp",
+            env!("CARGO_PKG_VERSION"),
+        ))
         .with_instructions(
             "Explicit native tools. Cancellation is cooperative and does not roll back effects.",
         )

@@ -396,6 +396,7 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "futures-util",
+ "lenso-authorization",
  "lenso-plugin-core",
  "rmcp",
  "serde",
