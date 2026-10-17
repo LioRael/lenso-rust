@@ -10,6 +10,9 @@ Native Rust plugin composition and applications. This repository owns:
   subscribers, redaction and explicit owned flush.
 - `crates/cache` (`lenso-cache`): typed bounded memory, finite TTL, exact
   invalidation and cancellation-safe shared loads.
+- `crates/mcp` (`lenso-mcp`): borrowed native tool projection with stable names,
+  scoped pagination, structured results and cancellation/drain. See its
+  [scope and host integration boundary](crates/mcp/README.md).
 - `crates/plugin-runtime` (`lenso-plugin-runtime`): optional Runtime connection
   injection and explicit post-setup exports.
 - `examples/batch`: the native serving App (`logs-batch`) and generated-client
