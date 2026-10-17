@@ -31,6 +31,7 @@ Rust base: `LioRael/lenso-rust` main
 | Per-instance plugin ownership | Existing typed `Handle<LocalStorage>`, exact dependency resolution, resources cleanup | Implemented |
 | No extra dependency container | Standalone service plus small `ObjectStorage` trait; no core edits | Implemented |
 | `StorageError` stable diagnostic surface | Typed `ErrorCode`, redacted Display/Debug, internal source chain | Implemented |
+| Preserve typed stream source errors | Download-to-upload pipelines retain `StorageError` classification through IO; raw source IO remains `Provider` | Implemented; cancellation, cleanup, metadata and multi-chunk copy regression |
 | Local signed URLs unsupported | Capabilities report false; signing methods are absent from the scoped trait | Deliberately not exposed |
 | Provider identity/capability strings | Rust type/instance handle supplies identity; capabilities are typed fields | Rust API adaptation |
 | JS numbers and AbortSignal | `u64`/`usize` eliminate negative/fractional sizes; cancellation token replaces signal | Rust API adaptation |

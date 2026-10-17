@@ -449,7 +449,7 @@ async fn put(inner: Arc<Inner>, mut input: PutObject, signals: Signals) -> Resul
             let count = tokio::select! {
                 biased;
                 _ = signals.cancelled() => return Err(StorageError::new(ErrorCode::Aborted)),
-                result = input.body.read(&mut buffer) => result.map_err(|error| StorageError::caused(ErrorCode::Provider, error))?,
+                result = input.body.read(&mut buffer) => result.map_err(StorageError::upload_source)?,
             };
             if count == 0 { break; }
             size = size.checked_add(count as u64).ok_or_else(|| StorageError::new(ErrorCode::TooLarge))?;
