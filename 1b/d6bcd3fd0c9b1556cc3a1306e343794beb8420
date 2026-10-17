@@ -1,0 +1,30 @@
+Cargo.lock
+  h_9d56aba080c170 5-10,227-241
+Cargo.toml
+  h_9d56aba080c170 12
+README.md
+  h_9d56aba080c170 13-15
+crates/mcp/Cargo.toml
+  h_9d56aba080c170 1-20
+crates/mcp/README.md
+  h_9d56aba080c170 1-60
+crates/mcp/VERIFICATION.md
+  h_9d56aba080c170 1-80
+crates/mcp/examples/mock.rs
+  h_9d56aba080c170 1-63
+crates/mcp/src/lib.rs
+  h_9d56aba080c170 1-635
+crates/mcp/tests/projection.rs
+  h_9d56aba080c170 1-518
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1bd6bcd3fd0c9b1556cc3a1306e343794beb8420",
+  "prompts": {},
+  "humans": {
+    "h_9d56aba080c170": {
+      "author": "LioRael <leo@lenso.dev>"
+    }
+  }
+}
