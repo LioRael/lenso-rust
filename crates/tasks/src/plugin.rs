@@ -2,9 +2,14 @@ use crate::{store::Store, validate_name, Task, TaskError, Tasks, WorkerOptions};
 use lenso_plugin_core::{BoxError, CleanupPhase, Plugin, Setup};
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 
-/// Owns exactly one SQLite connection. Starts no worker, timer, migration or network I/O.
+enum Provider {
+    Sqlite(PathBuf),
+    #[cfg(feature = "postgres")]
+    Postgres(Box<crate::PostgresConfig>),
+}
+/// Owns one provider connection acquired at startup. Starts no worker or migration.
 pub struct TasksPlugin {
-    path: PathBuf,
+    provider: Provider,
     queue: String,
     tasks: Vec<Task>,
     options: WorkerOptions,
@@ -12,7 +17,22 @@ pub struct TasksPlugin {
 impl TasksPlugin {
     pub fn new(path: impl Into<PathBuf>, queue: impl Into<String>, tasks: Vec<Task>) -> Self {
         Self {
-            path: path.into(),
+            provider: Provider::Sqlite(path.into()),
+            queue: queue.into(),
+            tasks,
+            options: WorkerOptions::default(),
+        }
+    }
+    /// Use PostgreSQL over a Unix socket or trusted local tunnel (NoTls).
+    /// Configure connection timeout and session statement_timeout in the Config.
+    #[cfg(feature = "postgres")]
+    pub fn postgres(
+        config: crate::PostgresConfig,
+        queue: impl Into<String>,
+        tasks: Vec<Task>,
+    ) -> Self {
+        Self {
+            provider: Provider::Postgres(Box::new(config)),
             queue: queue.into(),
             tasks,
             options: WorkerOptions::default(),
@@ -28,7 +48,9 @@ impl Plugin for TasksPlugin {
     fn validate(&self) -> Result<(), BoxError> {
         validate_name(&self.queue)?;
         self.options.validate()?;
-        if self.path.as_os_str().is_empty() || self.tasks.is_empty() {
+        if matches!(&self.provider, Provider::Sqlite(path) if path.as_os_str().is_empty())
+            || self.tasks.is_empty()
+        {
             return Err(TaskError::InvalidOptions.into());
         }
         let mut names = std::collections::HashSet::new();
@@ -43,7 +65,12 @@ impl Plugin for TasksPlugin {
     }
     async fn setup(self, setup: &mut Setup) -> Result<Arc<Tasks>, BoxError> {
         let store = Arc::new(
-            tokio::task::spawn_blocking(move || Store::open(&self.path, self.queue)).await??,
+            tokio::task::spawn_blocking(move || match self.provider {
+                Provider::Sqlite(path) => Store::open(&path, self.queue),
+                #[cfg(feature = "postgres")]
+                Provider::Postgres(config) => Store::open_postgres(&config, self.queue),
+            })
+            .await??,
         );
         let cleanup = store.clone();
         setup.on_cleanup(CleanupPhase::Resources, move || async move {
