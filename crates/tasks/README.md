@@ -4,7 +4,8 @@
 thin Lenso plugin, with an optional PostgreSQL provider described below.
 `provision(path, queue)` explicitly creates the schema and
 stable queue identity. Plugin startup only opens an existing provisioned queue;
-no request creates a schema or connection. SQLite work runs on Tokio's blocking
+no request creates a schema. PostgreSQL can replace broken connections in its
+startup-owned pool. SQLite work runs on Tokio's blocking
 pool. The plugin owns its connection and closes it after admitted work drains.
 
 ```rust,no_run
@@ -113,14 +114,32 @@ app.shutdown().await?;
 ```
 
 - Requires PostgreSQL 13+ SQL facilities (`gen_random_uuid`, `SKIP LOCKED`); tested
-  locally with PostgreSQL 18.6. This implementation uses `NoTls`: use a Unix
-  socket or an independently secured local tunnel. TLS connector integration,
-  pooling, automatic reconnect and network failover are not implemented.
-- One synchronous connection per plugin, acquired only at startup. All database
-  operations and close run on Tokio's blocking pool. Independent plugin instances
-  or processes provide concurrent workers. Set connection and statement timeouts
-  in `PostgresConfig`; reopen the plugin after a broken connection. No implicit
-  schema migration, worker loop, cron timer or schema repair occurs at startup.
+  locally with PostgreSQL 18.6. Existing constructors retain `NoTls` for Unix
+  sockets or independently secured local tunnels. `PostgresOptions::with_tls`
+  accepts a cloneable, thread-safe `postgres::tls::MakeTlsConnect` connector;
+  certificate roots, client certificates and hostname verification belong to that
+  connector. Set `PostgresConfig::ssl_mode(Require)` to prevent plaintext fallback.
+- Each plugin eagerly opens a fixed pool at startup (default 4 connections,
+  configurable 1–64). All database operations, reconnect and close run on Tokio's
+  blocking pool. Different slots allow concurrent operations on one `Tasks`
+  instance. A slot stays exclusive through the complete transaction. Pool checkout
+  waits at most 5 seconds by default, returning `TaskError::PostgresPoolTimeout`.
+  It does not bound connection/SQL time or the number of callers waiting in Tokio.
+- `PostgresOptions::max_connections` and `checkout_timeout` configure these bounds.
+  Missing connection timeout defaults to 5 seconds (driver timeout per host, not
+  a total failover budget). Set session `statement_timeout` in `PostgresConfig`
+  according to application needs; no new SQL timeout is imposed. Keep pool and
+  SQL contention below the worker lease/heartbeat budget.
+- Checkout probes a reused connection with one empty-query round trip. A failed
+  probe or known closed session is replaced once before caller SQL starts. A
+  failed reconnect returns an error; a later invocation can try again. Replacement
+  checks the provisioned schema and original queue identity; a changed identity
+  returns `TaskError::QueueIdentityChanged`. No implicit schema repair, migration,
+  background reconnection loop, custom network failover or transaction replay.
+- An error from caller SQL is returned unchanged, and that session is discarded.
+  No read, write or transaction is automatically replayed, including uncertain
+  commit outcomes. Other pool slots remain usable. After admitted work drains,
+  shutdown closes all idle sessions, including already disconnected ones.
 - Explicit provisioning serializes its DDL with a database advisory transaction
   lock. Queue identities are stable across repeated provisioning and restarts.
   Use a dedicated schema/search path consistently across all producers/workers.
@@ -137,19 +156,48 @@ app.shutdown().await?;
   retained job; `lookup` can inspect it. External business effects still require
   their own idempotency, and delivery remains at-least-once.
 
-Real PostgreSQL checks are opt-in and create/destroy their own temporary,
-socket-only clusters under `/tmp`. They do not read a DSN, `.env` or user DB.
-Install PostgreSQL `initdb`, `pg_ctl` and server binaries on `PATH`, then run:
+TLS example (add compatible `postgres-native-tls` and `native-tls` dependencies
+in the consuming application; the provider does not mandate a TLS backend):
+
+```rust,no_run
+# #[cfg(feature = "postgres")]
+# async fn tls_example() -> Result<(), Box<dyn std::error::Error>> {
+use lenso_tasks::{provision_postgres_with_options, PostgresConfig, PostgresOptions, TasksPlugin};
+use postgres::config::SslMode;
+use postgres_native_tls::MakeTlsConnector;
+let mut config = PostgresConfig::new();
+config.host("db.example.invalid").user("tasks").dbname("tasks")
+    .ssl_mode(SslMode::Require).options("-c statement_timeout=5000");
+// Default connector verifies the server certificate and hostname. For a private
+// CA, add its certificate to the builder without disabling verification.
+let tls = MakeTlsConnector::new(native_tls::TlsConnector::builder().build()?);
+let options = PostgresOptions::with_tls(config, tls)
+    .max_connections(4).checkout_timeout(std::time::Duration::from_secs(2));
+provision_postgres_with_options(options.clone(), "reports").await?;
+let plugin = TasksPlugin::postgres_with_options(options, "reports", vec![/* registered tasks */]);
+# let _ = plugin;
+# Ok(()) }
+```
+
+Real PostgreSQL checks are opt-in and create/destroy their own temporary clusters
+under `/tmp`. They do not read a DSN, `.env` or user DB. Pool/recovery tests use
+Unix sockets; TLS tests use a temporary certificate and an ephemeral IPv4 loopback
+port. Install PostgreSQL `initdb`, `pg_ctl`, server binaries and `openssl` on
+`PATH`, then run:
 
 ```sh
 cargo test --locked -p lenso-tasks --features postgres --test postgres postgres_contract -- --ignored --nocapture
 cargo test --locked -p lenso-tasks --features postgres --lib postgres_lock_and_expiry_contract -- --ignored --nocapture
+cargo test --locked -p lenso-tasks --features postgres --lib postgres_pool_recovery_contract -- --ignored --nocapture
+cargo test --locked -p lenso-tasks --features postgres --test postgres_tls -- --ignored --nocapture
 ```
 
-The first exercises concurrent provisioning, 16 racing duplicate producers, four
-workers claiming 25 jobs, retained acceptance, queue isolation, delayed retries,
-restart, cancellation/drain, stale fencing and an OS-killed worker after an
-idempotent fake business effect. The second verifies that heartbeat/settlement
-blocked on a row lock cannot revive an expired claim, a locked queue head is
-skipped, hard deadlines fence writes, and exhausted/cancelled claims stay final.
-Ordinary workspace tests compile these fixtures but do not start PostgreSQL.
+The existing contracts exercise concurrent provisioning, deduplication, workers,
+queue isolation, retry, cancellation/drain, killed-process recovery and row-lock
+expiry fencing. The pool contract verifies reuse and capacity, checkout timeout,
+concurrent producers/claims, an available read during a blocked write, a killed
+in-flight transaction without replay, reconnect/lease fencing, full server outage
+and restart, queue identity mismatch, and session cleanup. TLS checks require
+verified encryption, reject untrusted certificates and hostname mismatch, and
+exercise reconnect and shutdown through the public plugin API. Ordinary workspace
+tests compile these fixtures but do not start PostgreSQL.

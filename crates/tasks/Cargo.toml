@@ -17,6 +17,8 @@ postgres = { version = "0.19", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
+native-tls = "0.2"
+postgres-native-tls = "0.5"
 
 [features]
 postgres = ["dep:postgres"]

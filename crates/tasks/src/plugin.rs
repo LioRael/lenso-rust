@@ -5,9 +5,9 @@ use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 enum Provider {
     Sqlite(PathBuf),
     #[cfg(feature = "postgres")]
-    Postgres(Box<crate::PostgresConfig>),
+    Postgres(Box<crate::PostgresOptions>),
 }
-/// Owns one provider connection acquired at startup. Starts no worker or migration.
+/// Owns provider connections acquired at startup. Starts no worker or migration.
 pub struct TasksPlugin {
     provider: Provider,
     queue: String,
@@ -31,6 +31,15 @@ impl TasksPlugin {
         queue: impl Into<String>,
         tasks: Vec<Task>,
     ) -> Self {
+        Self::postgres_with_options(crate::PostgresOptions::new(config), queue, tasks)
+    }
+    /// PostgreSQL with configurable TLS and bounded connection reuse.
+    #[cfg(feature = "postgres")]
+    pub fn postgres_with_options(
+        config: crate::PostgresOptions,
+        queue: impl Into<String>,
+        tasks: Vec<Task>,
+    ) -> Self {
         Self {
             provider: Provider::Postgres(Box::new(config)),
             queue: queue.into(),
@@ -47,6 +56,10 @@ impl Plugin for TasksPlugin {
     type Service = Tasks;
     fn validate(&self) -> Result<(), BoxError> {
         validate_name(&self.queue)?;
+        #[cfg(feature = "postgres")]
+        if let Provider::Postgres(options) = &self.provider {
+            options.validate()?;
+        }
         self.options.validate()?;
         if matches!(&self.provider, Provider::Sqlite(path) if path.as_os_str().is_empty())
             || self.tasks.is_empty()
@@ -68,7 +81,7 @@ impl Plugin for TasksPlugin {
             tokio::task::spawn_blocking(move || match self.provider {
                 Provider::Sqlite(path) => Store::open(&path, self.queue),
                 #[cfg(feature = "postgres")]
-                Provider::Postgres(config) => Store::open_postgres(&config, self.queue),
+                Provider::Postgres(config) => Store::open_postgres(*config, self.queue),
             })
             .await??,
         );
