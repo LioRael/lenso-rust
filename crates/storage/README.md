@@ -78,6 +78,13 @@ for trusted diagnostics. Download `io::Error` values contain a downcastable
 `StorageError`; cancellation is terminal, not an automatically retried
 `Interrupted` IO error.
 
+Downloads can feed `PutObject::new` directly without collecting the payload.
+Copy content type, size and custom metadata from the download when needed; the
+destination computes its own ETag and modification time. Upload source IO errors
+wrapping a `StorageError` retain that classification (including `Aborted` from a
+cancelled download). Other source IO errors remain `Provider`; their details are
+available only through the diagnostic source chain. Failed copies are not published.
+
 ## Cancellation and lifecycle
 
 Each operation accepts an optional `CancellationToken`. Cancelling it interrupts

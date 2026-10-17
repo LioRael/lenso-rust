@@ -57,6 +57,110 @@ fn assert_empty(temp: &TempDir) {
     assert_eq!(fs::read_dir(root(temp)).unwrap().count(), 0);
 }
 
+#[tokio::test]
+async fn piping_downloads_preserves_bytes_metadata_and_cancellation_classification() {
+    let (_source_temp, source) = fixture().await;
+    let (target_temp, target) = fixture().await;
+    let value = "streamed payload".repeat(20_000);
+    let mut original = input("source", &value);
+    original.content_type = "text/plain".into();
+    original
+        .custom_metadata
+        .insert("owner".into(), "alice".into());
+    let metadata = source.put(original).await.unwrap();
+    let download = source.get("source", ReadOptions::default()).await.unwrap();
+    let mut upload = PutObject::new("copy", download.body);
+    upload.size = Some(download.metadata.size);
+    upload.content_type = download.metadata.content_type;
+    upload.custom_metadata = download.metadata.custom_metadata;
+    let copied = target.put(upload).await.unwrap();
+    assert_eq!(copied.size, metadata.size);
+    assert_eq!(copied.etag, metadata.etag);
+    assert_eq!(copied.content_type, metadata.content_type);
+    assert_eq!(copied.custom_metadata, metadata.custom_metadata);
+    assert_eq!(text(&target, "copy").await, value);
+    target
+        .delete("copy", OperationOptions::default())
+        .await
+        .unwrap();
+
+    let token = CancellationToken::new();
+    let download = source
+        .get(
+            "source",
+            ReadOptions {
+                cancellation: Some(token.clone()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    token.cancel();
+    code(
+        target
+            .put(PutObject::new("cancelled-copy", download.body))
+            .await,
+        ErrorCode::Aborted,
+    );
+    assert_empty(&target_temp);
+    assert_eq!(text(&source, "source").await, value);
+    source.close().await.unwrap();
+    target.close().await.unwrap();
+}
+
+struct FailedSource(Option<io::Error>);
+impl AsyncRead for FailedSource {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        _: &mut Context<'_>,
+        _: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        Poll::Ready(Err(self
+            .0
+            .take()
+            .expect("failed source must not be retried")))
+    }
+}
+
+#[tokio::test]
+async fn upload_preserves_typed_source_errors_but_does_not_reclassify_raw_io_errors() {
+    let (temp, storage) = fixture().await;
+    for expected in [
+        ErrorCode::Aborted,
+        ErrorCode::TooLarge,
+        ErrorCode::Forbidden,
+        ErrorCode::Conflict,
+        ErrorCode::NotFound,
+        ErrorCode::InvalidInput,
+        ErrorCode::InvalidKey,
+        ErrorCode::Unsupported,
+        ErrorCode::Provider,
+    ] {
+        let source = FailedSource(Some(io::Error::other(StorageError::new(expected))));
+        code(
+            storage.put(PutObject::new("failed", source)).await,
+            expected,
+        );
+        assert_empty(&temp);
+    }
+    for kind in [
+        io::ErrorKind::PermissionDenied,
+        io::ErrorKind::NotFound,
+        io::ErrorKind::Other,
+    ] {
+        let source = FailedSource(Some(io::Error::new(kind, "private source detail")));
+        let error = storage
+            .put(PutObject::new("failed", source))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), ErrorCode::Provider);
+        assert!(!format!("{error:?} {error}").contains("private source detail"));
+        assert!(std::error::Error::source(&error).is_some());
+        assert_empty(&temp);
+    }
+    storage.close().await.unwrap();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn listing_tolerates_owned_staging_cleanup() {
     let (temp, storage) = fixture().await;
