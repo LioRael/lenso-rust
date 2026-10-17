@@ -9,6 +9,12 @@ Rust base: `LioRael/lenso-rust` main
 This is semantic alignment of the pure decision/RBAC subset, not an assertion
 that every TS package entry point has been ported.
 
+Access/session follow-up reference: TS `5f91b9e20f7733fdd7e1c0db0ffcef9f7ec1a98c`
+(`packages/auth/src/core.ts`, `sessions.ts`, `packages/authorization/src/auth.ts`),
+Rust baseline `2640a273750333e982d07684a3ecfa31d0e38811`. Host authentication remains
+external; the new adapter does not claim to port TS's actor proof mechanism or
+managed session store.
+
 | TS surface / observable behavior | Rust status | Evidence / boundary |
 | --- | --- | --- |
 | `core.ts`: default deny, applicable deny over allow, policy abstain | Implemented | `decisions::conflicts_are_order_independent_and_default_deny` |
@@ -37,7 +43,9 @@ that every TS package entry point has been ported.
 | Dynamic JS invalid values / whole-object snapshot budget | Adapted | Rust types exclude undefined/nonfinite/functions/cycles; identifiers and attribute/condition/graph bounds validated; no JS prototype/getter emulation |
 | `effectiveRolePermissions` / `effectivePermissions` public helpers | Not exported | Internal traversal supports RBAC; avoid an unchecked public graph-reading API |
 | `RoleStore.compareAndSwap` trait | Narrowed | Read-only `RoleSource` is the extension point; memory CAS is concrete; persistent writes belong to an application adapter |
-| `auth.ts` verified Auth chain adapter | Not implemented | Rust Auth not required; no forged placeholder identities or token validation |
+| `auth.ts` verified Auth chain adapter | Native host integration seam | `AuthorizedAccess<E>` invokes an explicit trusted `AccessVerifier<E>` per call, pins exact realm/audience, then uses the existing decision engine; no Rust Auth/token implementation |
+| Session renewal/revocation visibility | Host-owned, read afresh per access call | `access::each_call_reads_renewal_and_revocation_without_extending_an_old_snapshot`; no renewal side effect or cross-call cache |
+| Auth post-policy session expiry / credential ceiling | Checked before returning allow | Minimum session/credential expiry, inclusive boundary and backwards-clock refusal; existing authoritative resource scope and permission intersection retained |
 | `management.ts`, `manage.ts`: authorized role editing/delegation and inspection | Not implemented | Memory CAS is trusted infrastructure, not an authorized management endpoint |
 | `list.ts`: bounded list filtering and pagination | Not implemented | Single-object decisions do not authorize a query, total, page or aggregate |
 | `drizzle/*`, schemas, migrations, SQLite/PG/D1 stores | Not implemented | No database dependency or schema; integrate through explicit `RoleSource` if needed |

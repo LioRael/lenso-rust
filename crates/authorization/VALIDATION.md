@@ -108,8 +108,29 @@ for this crate; applications may add one at integration time if desired.
 
 ## Remaining scope boundaries
 
-No delivery blocker remains. Auth adapters, persistent stores/migrations, role
+No delivery blocker remains. Persistent stores/migrations, role
 management/delegation, list filtering, transport registration and SQL translation
 are explicitly unimplemented; see [PARITY.md](PARITY.md). A prior allow never fences
 a future database or external side effect. Custom sources own their consistency
 and cancellation behavior; callback-spawned work is not owned by this engine.
+
+## Access boundary follow-up (2026-10-18)
+
+Rust base `2640a273750333e982d07684a3ecfa31d0e38811`; TS comparison
+`5f91b9e20f7733fdd7e1c0db0ffcef9f7ec1a98c`. Changes are confined to this crate;
+the existing Authorization/RBAC delivery is retained. `AuthorizedAccess` is a
+host integration seam, not a new Rust authenticator or managed-session store.
+
+Validated with Rust 1.94.0 and cached, locked dependencies:
+
+- `cargo test --workspace --locked --offline`: passed (217 tests).
+- `cargo test -p lenso-authorization --no-default-features --locked --offline`: passed.
+- `cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings`: passed.
+- `cargo fmt --all --check`: passed.
+
+The first workspace run was sandbox-blocked at Runtime loopback listener binding;
+the authorized local rerun passed. New public-API tests exercise realm/audience
+isolation, host renewal/revocation visibility, unchanged in-flight expiry,
+credential ceilings after resource resolution, post-observer expiry, clock
+rollback, and verifier timeout/panic/cancellation. No real identity, credential,
+online permission, remote push, publication or deployment was created.

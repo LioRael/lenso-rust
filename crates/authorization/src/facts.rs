@@ -123,7 +123,7 @@ impl Permission {
 #[derive(Clone, Debug)]
 pub struct CredentialLimit {
     pub permissions: Vec<Permission>,
-    /// Unix milliseconds, checked once at the evaluation snapshot.
+    /// Unix milliseconds, checked at entry and again before returning an allow.
     pub expires_at: Option<u64>,
 }
 

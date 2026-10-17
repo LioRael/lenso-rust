@@ -56,12 +56,41 @@ must authenticate, load authoritative resources and establish credential ceiling
 before invoking this service. This crate does not verify passwords, tokens or
 Runtime peer identity. It provides no serialization-based authentication contract.
 
+## Existing host access and sessions
+
+`AuthorizedAccess::new(realm, audience, verifier, authorization)` connects an
+existing host access service through `AccessVerifier<E>`. Its `check`, `can` and
+`enforce` calls accept host evidence, action, resource and context. Only the
+verifier supplies principal, audience, effective session expiry and credential
+permissions. Realm and audience must match the configured strings exactly, even
+when the underlying authorization service has no identity requirements.
+
+Implement the verifier with the host's existing authentication, revocation and
+membership chain for the supplied resource; return `None` for refusal or required
+reauthentication. The trait is a trusted integration point, not proof that a
+caller-created struct is authenticated. It introduces no token format, user
+database or authentication method. The public API integration cases in
+[tests/access.rs](tests/access.rs) use only a simulated in-memory host.
+
+Every call verifies again. Host-side renewal is visible on the next call, and
+cannot extend an already captured expiry. Session issuance, renewal frequency,
+absolute lifetime, authentication age and assurance remain host responsibilities.
+The verifier must return the current effective idle/absolute expiry. A revoked
+session must be refused by the host; this adapter installs no positive cache.
+The verifier and authorization share one deadline and cancellation scope.
+
+Both session and credential expiry are checked again before returning an allow,
+after asynchronous policies and observation. Equality with expiry refuses access;
+a failed or backwards final clock reading also refuses access. This does not make
+revocation atomic with a later business write. Host/provider ownership and the
+outer Core work guard remain unchanged.
+
 ## Evaluation contract
 
 The engine evaluates in this order:
 
 1. Validate resource/principal identifiers and attribute bounds; read the trusted
-   clock once; reject unknown actions and caller cancellation.
+   clock for the evaluation snapshot; reject unknown actions and caller cancellation.
 2. Enforce configured identity presence, exact realms, operation audiences and
    credential presence.
 3. Resolve an optional authoritative resource. Type and ID cannot change; its
@@ -72,7 +101,8 @@ The engine evaluates in this order:
    action, scope or credential ceilings.
 5. Evaluate matching rules and all policies. Applicable deny wins; otherwise any
    allow grants; no match/all abstain denies. Any evaluated extension error or
-   unwinding panic refuses access, even if an earlier rule allowed.
+   unwinding panic refuses access, even if an earlier rule allowed. An expiring
+   credential/session requires a final clock check before returning an allow.
 
 Scopes compare both `kind` (TS `type`) and `id`. There is no prefix, parent,
 tenant inference or wildcard; `*` is an ordinary string. Omitting a permission's
@@ -118,7 +148,8 @@ panics are caught, but the process panic hook still runs. Abort panics, process
 termination and a stopped runtime cannot be recovered.
 
 `Observer` receives only completed policy decisions, as in TS; early validation,
-boundary, timeout and error outcomes are not an audit stream. Observer error or
+boundary, timeout and error outcomes are not an audit stream. Expiry or timeout
+after observation may still refuse the final result. Observer error or
 timeout denies. `explain` is disabled unless an exact action/resource gate is
 configured and the manager request is allowed. Explanations expose only ordinal
 paths such as `rules/0/allow`, never rule IDs. Manager facts are still trusted
