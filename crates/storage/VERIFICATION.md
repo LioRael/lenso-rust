@@ -1,5 +1,29 @@
 # Storage delivery verification
 
+## Stream composition correction (2026-10-17 UTC)
+
+Based on `b906eed4ce6c72b6e5467e14706b7ac11091b74b`, in an independent
+`work/storage-stream-cancellation` checkout. The TS inventory referenced in
+PARITY preserves existing StorageError values in local.ts; Rust previously
+converted every upload source error to Provider. The new public-API regression
+first failed with Provider instead of Aborted when piping a cancelled download
+into an upload, then passed after preserving directly wrapped StorageError codes.
+Raw source IO failures remain Provider with a retained, redacted diagnostic chain.
+
+Rust 1.99.0, macOS arm64, offline dependencies:
+- `cargo test --locked --offline -p lenso-storage`: 17 integration + 1 doc test passed.
+- `cargo test --workspace --locked --offline`: passed. Initial sandbox run was
+  blocked at existing Runtime Unix socket fixtures; rerun with local socket
+  access passed without source changes.
+- `cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings`: passed.
+- `cargo fmt --all --check` and `git diff --check`: passed.
+
+No public signatures, dependencies, lockfile or shared entry points changed.
+Integration remains `PutObject::new(key, download.body)`; callers explicitly copy
+desired metadata. Tests cover a 320 KB copy, typed errors, cancellation cleanup
+and ordinary source IO redaction. Only crates/storage files changed; no push,
+merge, publication, cloud access or credentials were used.
+
 Verified 2026-10-15 on macOS arm64 with Rust/Cargo 1.99.0. All tests use disposable
 temporary directories with canonicalized trusted ancestry. No production paths,
 credentials, network providers, shared source repositories or other plugin task

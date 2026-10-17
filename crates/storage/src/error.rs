@@ -63,6 +63,16 @@ impl StorageError {
         };
         Self::caused(code, error)
     }
+    pub(crate) fn upload_source(error: io::Error) -> Self {
+        // A DownloadBody can feed another upload. Preserve its domain error,
+        // including cancellation, without treating arbitrary source IO failures
+        // as failures of the destination's filesystem or access policy.
+        let code = error
+            .get_ref()
+            .and_then(|source| source.downcast_ref::<Self>())
+            .map_or(ErrorCode::Provider, Self::code);
+        Self::caused(code, error)
+    }
     pub(crate) fn into_io(self) -> io::Error {
         // Interrupted is retried by reader helpers; cancellation is terminal.
         io::Error::other(self)
