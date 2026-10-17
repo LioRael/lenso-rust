@@ -9,6 +9,7 @@ members = [
     "crates/storage",
     "crates/realtime",
     "crates/limits",
+    "crates/tasks",
     "crates/mcp",
     "crates/plugin-runtime",
     "examples/batch",
