@@ -6,6 +6,8 @@ mod worker;
 
 use lenso_plugin_core::WorkGate;
 pub use plugin::TasksPlugin;
+#[cfg(feature = "postgres")]
+pub use postgres::Config as PostgresConfig;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::BTreeMap, future::Future, path::Path, pin::Pin, sync::Arc};
@@ -25,6 +27,12 @@ pub enum TaskError {
     Closed,
     #[error("task provider failed")]
     Provider(#[source] rusqlite::Error),
+    #[cfg(feature = "postgres")]
+    #[error("task PostgreSQL provider failed")]
+    Postgres(#[from] postgres::Error),
+    #[cfg(feature = "postgres")]
+    #[error("task provider contains invalid data")]
+    InvalidStoredData,
     #[error("task runtime failed")]
     Runtime,
     #[error("task claim is no longer owned")]
@@ -218,6 +226,17 @@ pub async fn provision(path: impl AsRef<Path>, queue: &str) -> Result<(), TaskEr
         .map_err(|_| TaskError::Runtime)?
 }
 
+/// Explicit PostgreSQL provisioning; requires PostgreSQL 13+ and a dedicated
+/// schema/database. Connections use NoTls (Unix socket or trusted local tunnel).
+#[cfg(feature = "postgres")]
+pub async fn provision_postgres(config: PostgresConfig, queue: &str) -> Result<(), TaskError> {
+    validate_name(queue)?;
+    let queue = queue.to_owned();
+    tokio::task::spawn_blocking(move || store::provision_postgres(&config, &queue))
+        .await
+        .map_err(|_| TaskError::Runtime)?
+}
+
 pub struct Tasks {
     pub(crate) store: Arc<store::Store>,
     pub(crate) tasks: Arc<BTreeMap<String, Task>>,
@@ -232,7 +251,7 @@ impl Tasks {
     pub(crate) async fn database<T, F>(&self, operation: F) -> Result<T, TaskError>
     where
         T: Send + 'static,
-        F: FnOnce(&mut store::StoreConnection) -> Result<T, TaskError> + Send + 'static,
+        F: FnOnce(&mut dyn store::StoreConnection) -> Result<T, TaskError> + Send + 'static,
     {
         let store = self.store.clone();
         tokio::task::spawn_blocking(move || store.with(operation))
@@ -244,7 +263,7 @@ impl Tasks {
     async fn admitted<T, F>(&self, operation: F) -> Result<T, TaskError>
     where
         T: Send + 'static,
-        F: FnOnce(&mut store::StoreConnection) -> Result<T, TaskError> + Send + 'static,
+        F: FnOnce(&mut dyn store::StoreConnection) -> Result<T, TaskError> + Send + 'static,
     {
         let guard = self.gate.enter().map_err(|_| TaskError::Closed)?;
         self.database(move |connection| {
