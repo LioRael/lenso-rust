@@ -398,6 +398,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "lenso-events"
+version = "0.1.0"
+dependencies = [
+ "fs2",
+ "lenso-plugin-core",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "lenso-limits"
 version = "0.1.0"
 dependencies = [
