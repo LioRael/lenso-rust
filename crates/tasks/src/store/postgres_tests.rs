@@ -1,12 +1,12 @@
 use super::*;
+use crate::store::postgres_test_support as support;
 use crate::RetryPolicy;
+use ::postgres::NoTls;
 use serde_json::json;
 use std::{
     thread,
     time::{Duration, Instant},
 };
-#[path = "../../tests/support/postgres.rs"]
-mod support;
 
 fn task(attempts: u32) -> Task {
     Task::new(
@@ -24,9 +24,10 @@ fn task(attempts: u32) -> Task {
 fn postgres_lock_and_expiry_contract() {
     let cluster = support::Cluster::new();
     let mut config = cluster.config();
-    provision(&config, "fence").unwrap();
+    provision(&PostgresOptions::new(config.clone()), "fence").unwrap();
     let mut observer = config.connect(NoTls).unwrap();
-    let (mut next, _) = PostgresConnection::open(&config, "fence".into()).unwrap();
+    let (mut next, _) =
+        PostgresConnection::open(&PostgresOptions::new(config.clone()), "fence".into()).unwrap();
     config.application_name("lenso-fencing-waiter");
     let options = WorkerOptions {
         lease_ms: 500,
@@ -35,7 +36,9 @@ fn postgres_lock_and_expiry_contract() {
     };
     // Both heartbeat and acknowledgement must evaluate time AFTER waiting for a lock.
     for settle in [false, true] {
-        let (mut old, _) = PostgresConnection::open(&config, "fence".into()).unwrap();
+        let (mut old, _) =
+            PostgresConnection::open(&PostgresOptions::new(config.clone()), "fence".into())
+                .unwrap();
         let id = old
             .enqueue(&task(2), &json!(null), &Default::default())
             .unwrap();

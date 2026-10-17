@@ -11,6 +11,8 @@ pub use postgres::Config as PostgresConfig;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::BTreeMap, future::Future, path::Path, pin::Pin, sync::Arc};
+#[cfg(feature = "postgres")]
+pub use store::PostgresOptions;
 use tokio::sync::watch;
 
 #[derive(Debug, thiserror::Error)]
@@ -33,6 +35,12 @@ pub enum TaskError {
     #[cfg(feature = "postgres")]
     #[error("task provider contains invalid data")]
     InvalidStoredData,
+    #[cfg(feature = "postgres")]
+    #[error("task PostgreSQL pool checkout timed out")]
+    PostgresPoolTimeout,
+    #[cfg(feature = "postgres")]
+    #[error("task PostgreSQL queue identity changed")]
+    QueueIdentityChanged,
     #[error("task runtime failed")]
     Runtime,
     #[error("task claim is no longer owned")]
@@ -227,10 +235,20 @@ pub async fn provision(path: impl AsRef<Path>, queue: &str) -> Result<(), TaskEr
 }
 
 /// Explicit PostgreSQL provisioning; requires PostgreSQL 13+ and a dedicated
-/// schema/database. Connections use NoTls (Unix socket or trusted local tunnel).
+/// schema/database. Uses NoTls; use `provision_postgres_with_options` for TLS.
 #[cfg(feature = "postgres")]
 pub async fn provision_postgres(config: PostgresConfig, queue: &str) -> Result<(), TaskError> {
+    provision_postgres_with_options(PostgresOptions::new(config), queue).await
+}
+
+/// Explicit provisioning with a caller-selected TLS connector. Opens one connection.
+#[cfg(feature = "postgres")]
+pub async fn provision_postgres_with_options(
+    config: PostgresOptions,
+    queue: &str,
+) -> Result<(), TaskError> {
     validate_name(queue)?;
+    config.validate()?;
     let queue = queue.to_owned();
     tokio::task::spawn_blocking(move || store::provision_postgres(&config, &queue))
         .await

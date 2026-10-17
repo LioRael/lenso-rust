@@ -1,9 +1,10 @@
-use super::{Claim, StoreConnection};
+use super::{Claim, PostgresOptions, StoreConnection};
 use crate::{
     CancelResult, EnqueueOptions, Failure, JobState, JobStatus, Task, TaskError, WorkerOptions,
 };
-use ::postgres::{Client, Config, IsolationLevel, NoTls, Row, Transaction};
+use ::postgres::{Client, IsolationLevel, Row, Transaction};
 use serde_json::Value;
+use std::error::Error as _;
 
 // Each write starts after acquiring any blocking row locks. statement_timestamp
 // then gives one server-clock instant for all ownership checks in that write.
@@ -17,8 +18,11 @@ pub(crate) struct PostgresConnection {
     queue: String,
 }
 impl PostgresConnection {
-    pub fn open(config: &Config, queue: String) -> Result<(Self, String), TaskError> {
-        let mut connection = config.connect(NoTls)?;
+    pub fn healthy(&mut self) -> bool {
+        !self.connection.is_closed() && self.connection.simple_query("").is_ok()
+    }
+    pub fn open(config: &PostgresOptions, queue: String) -> Result<(Self, String), TaskError> {
+        let mut connection = config.connect()?;
         let identity = connection
             .query_one(
                 "SELECT identity FROM lenso_task_queue WHERE name = $1",
@@ -29,8 +33,8 @@ impl PostgresConnection {
         Ok((Self { connection, queue }, identity))
     }
 }
-pub(crate) fn provision(config: &Config, queue: &str) -> Result<(), TaskError> {
-    let mut client = config.connect(NoTls)?;
+pub(crate) fn provision(config: &PostgresOptions, queue: &str) -> Result<(), TaskError> {
+    let mut client = config.connect()?;
     let mut tx = client
         .build_transaction()
         .isolation_level(IsolationLevel::ReadCommitted)
@@ -97,7 +101,24 @@ fn lock_claim(tx: &mut Transaction<'_>, queue: &str, claim: &Claim) -> Result<()
 }
 impl StoreConnection for PostgresConnection {
     fn close(self: Box<Self>) -> Result<(), TaskError> {
-        self.connection.close()?;
+        if !self.connection.is_closed() {
+            if let Err(error) = self.connection.close() {
+                // Client::close consumes the session even on transport failure.
+                // Work has already drained; a dead peer needs no further cleanup.
+                let disconnected = error.is_closed()
+                    || error.source().is_some_and(|e| e.is::<std::io::Error>())
+                    || error.as_db_error().is_some_and(|e| {
+                        matches!(
+                            *e.code(),
+                            ::postgres::error::SqlState::ADMIN_SHUTDOWN
+                                | ::postgres::error::SqlState::CRASH_SHUTDOWN
+                        )
+                    });
+                if !disconnected {
+                    return Err(error.into());
+                }
+            }
+        }
         Ok(())
     }
     fn enqueue(

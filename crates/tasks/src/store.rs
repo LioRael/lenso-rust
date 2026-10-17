@@ -3,13 +3,20 @@ use serde_json::Value;
 use std::{path::Path, sync::Mutex};
 #[cfg(feature = "postgres")]
 mod postgres;
+#[cfg(feature = "postgres")]
+mod postgres_pool;
+#[cfg(all(test, feature = "postgres"))]
+#[path = "../tests/support/postgres.rs"]
+mod postgres_test_support;
+#[cfg(feature = "postgres")]
+pub use postgres_pool::PostgresOptions;
 mod sqlite;
 #[cfg(feature = "postgres")]
 pub(crate) use postgres::provision as provision_postgres;
 pub(crate) use sqlite::provision;
 
-// Synchronous provider operations run only on the blocking pool. A mutable
-// connection serializes local operations; providers fence across connections.
+// Synchronous provider operations run only on the blocking pool. SQLite serializes
+// local operations; PostgreSQL leases pool slots. Both fence across connections.
 pub(crate) trait StoreConnection: Send {
     fn close(self: Box<Self>) -> Result<(), TaskError>;
     fn enqueue(
@@ -40,16 +47,23 @@ pub(crate) struct Claim {
     pub token: String,
 }
 
+enum StoreInner {
+    Sqlite(Mutex<Option<Box<dyn StoreConnection>>>),
+    #[cfg(feature = "postgres")]
+    Postgres(Box<postgres_pool::PostgresPool>),
+}
+
 pub(crate) struct Store {
-    inner: Mutex<Option<Box<dyn StoreConnection>>>,
+    inner: StoreInner,
     pub identity: String,
 }
 impl Store {
     #[cfg(feature = "postgres")]
-    pub fn open_postgres(config: &::postgres::Config, queue: String) -> Result<Self, TaskError> {
-        let (connection, identity) = postgres::PostgresConnection::open(config, queue)?;
+    pub fn open_postgres(config: PostgresOptions, queue: String) -> Result<Self, TaskError> {
+        let pool = postgres_pool::PostgresPool::open(config, queue)?;
+        let identity = pool.identity().to_owned();
         Ok(Self {
-            inner: Mutex::new(Some(Box::new(connection))),
+            inner: StoreInner::Postgres(Box::new(pool)),
             identity,
         })
     }
@@ -57,7 +71,7 @@ impl Store {
     pub fn open(path: &Path, queue: String) -> Result<Self, TaskError> {
         let (connection, identity) = sqlite::SqliteConnection::open(path, queue)?;
         Ok(Self {
-            inner: Mutex::new(Some(Box::new(connection))),
+            inner: StoreInner::Sqlite(Mutex::new(Some(Box::new(connection)))),
             identity,
         })
     }
@@ -65,13 +79,25 @@ impl Store {
         &self,
         operation: impl FnOnce(&mut dyn StoreConnection) -> Result<T, TaskError>,
     ) -> Result<T, TaskError> {
-        let mut inner = self.inner.lock().map_err(|_| TaskError::Runtime)?;
-        operation(inner.as_mut().ok_or(TaskError::Closed)?.as_mut())
+        match &self.inner {
+            StoreInner::Sqlite(inner) => {
+                let mut inner = inner.lock().map_err(|_| TaskError::Runtime)?;
+                operation(inner.as_mut().ok_or(TaskError::Closed)?.as_mut())
+            }
+            #[cfg(feature = "postgres")]
+            StoreInner::Postgres(pool) => pool.with(operation),
+        }
     }
     pub fn close(&self) -> Result<(), TaskError> {
-        if let Some(connection) = self.inner.lock().map_err(|_| TaskError::Runtime)?.take() {
-            connection.close()?;
+        match &self.inner {
+            StoreInner::Sqlite(inner) => {
+                if let Some(connection) = inner.lock().map_err(|_| TaskError::Runtime)?.take() {
+                    connection.close()?;
+                }
+                Ok(())
+            }
+            #[cfg(feature = "postgres")]
+            StoreInner::Postgres(pool) => pool.close(),
         }
-        Ok(())
     }
 }
