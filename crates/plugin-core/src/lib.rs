@@ -24,7 +24,12 @@ use std::{
 use tokio::sync::{oneshot, watch, Mutex, Notify};
 
 mod config;
+mod inspection;
 pub use config::{Config, ConfigError, ConfigFieldSource, ConfigSource};
+pub use inspection::{
+    CheckStatus, DependencyInspection, Diagnostic, DiagnosticCode, Inspection, InspectionCheck,
+    InstanceInspection,
+};
 
 /// An application or cleanup error supplied by a plugin.
 pub type BoxError = Box<dyn Error + Send + Sync + 'static>;
@@ -355,7 +360,7 @@ impl<P: Plugin> Instance<P> {
 #[derive(Default)]
 pub struct App {
     instances: Vec<InstalledInstance>,
-    binding_errors: Vec<String>,
+    binding_errors: Vec<Diagnostic>,
 }
 impl App {
     /// Create an empty application.
@@ -398,90 +403,56 @@ impl App {
     }
     /// Bind exactly once. Foreign or duplicate bindings fail validation at start.
     pub fn bind<P: Plugin>(&mut self, handle: &Handle<P::Service>, plugin: P) {
-        match self.instances.iter_mut().find(|i| i.key == handle.key) {
-            Some(i) if i.plugin.is_none() && i.service_type == TypeId::of::<P::Service>() => {
+        match self
+            .instances
+            .iter_mut()
+            .enumerate()
+            .find(|(_, i)| i.key == handle.key)
+        {
+            Some((_, i)) if i.plugin.is_none() && i.service_type == TypeId::of::<P::Service>() => {
                 i.plugin = Some(Box::new(plugin));
             }
-            Some(i) => self
-                .binding_errors
-                .push(format!("duplicate or mismatched binding: {}", i.name)),
-            None => self
-                .binding_errors
-                .push("binding uses a foreign handle".into()),
+            Some((index, _)) => self.binding_errors.push(Diagnostic::new(
+                DiagnosticCode::InvalidBinding,
+                Some(index),
+                "duplicate or mismatched binding",
+            )),
+            None => self.binding_errors.push(Diagnostic::new(
+                DiagnosticCode::ForeignBinding,
+                None,
+                "binding uses a foreign handle",
+            )),
         }
     }
+    /// Inspect configuration and dependency declarations without setup or a Tokio runtime.
+    ///
+    /// This borrows the builder; it can still be started afterwards. Plugin validation
+    /// and dependency hooks must themselves be free of resource acquisition. Inspection
+    /// cannot certify resource availability, setup success, or runtime readiness.
+    pub fn inspect(&self) -> Inspection {
+        self.inspect_plan().0
+    }
+
     fn plan(&self) -> Result<(Vec<usize>, Vec<Vec<InstanceKey>>), StartError> {
-        let mut errors = self.binding_errors.clone();
-        let mut names = HashSet::new();
-        let mut keys = HashMap::new();
-        for (index, i) in self.instances.iter().enumerate() {
-            if !names.insert(&i.name) {
-                errors.push(format!("duplicate instance name: {}", i.name));
-            }
-            if keys.insert(i.key.clone(), index).is_some() {
-                errors.push(format!("duplicate instance identity: {}", i.name));
-            }
-        }
-        let mut dependencies = Vec::new();
-        for i in &self.instances {
-            let deps = match &i.plugin {
-                Some(plugin) => {
-                    match catch_unwind(AssertUnwindSafe(|| plugin.validate())) {
-                        Ok(Ok(())) => {}
-                        Ok(Err(error)) => {
-                            let diagnostic = error
-                                .downcast_ref::<ConfigError>()
-                                .map(|error| error.to_string())
-                                .unwrap_or_else(|| "plugin configuration rejected".into());
-                            errors.push(format!("invalid config for {}: {diagnostic}", i.name));
-                        }
-                        Err(_) => errors.push(format!("validation panicked for {}", i.name)),
-                    }
-                    match catch_unwind(AssertUnwindSafe(|| plugin.dependencies())) {
-                        Ok(deps) => deps,
-                        Err(_) => {
-                            errors.push(format!("dependencies panicked for {}", i.name));
-                            Vec::new()
-                        }
-                    }
-                }
-                None => {
-                    errors.push(format!("unbound instance: {}", i.name));
-                    Vec::new()
-                }
-            };
-            for dep in &deps {
-                if !keys.contains_key(dep) {
-                    errors.push(format!("missing or foreign dependency for {}", i.name));
-                }
-            }
-            dependencies.push(deps);
-        }
-        let mut order = Vec::new();
-        let mut visited = HashSet::new();
-        loop {
-            let before = order.len();
-            for (index, i) in self.instances.iter().enumerate() {
-                if !visited.contains(&i.key)
-                    && dependencies[index].iter().all(|d| visited.contains(d))
-                {
-                    visited.insert(i.key.clone());
-                    order.push(index);
-                }
-            }
-            if order.len() == before {
-                break;
-            }
-        }
-        if order.len() != self.instances.len()
-            && dependencies.iter().flatten().all(|d| keys.contains_key(d))
-        {
-            errors.push("dependency cycle".into());
-        }
-        if errors.is_empty() {
-            Ok((order, dependencies))
+        let (inspection, dependencies) = self.inspect_plan();
+        if inspection.is_valid() {
+            Ok((inspection.startup_order, dependencies))
         } else {
-            Err(StartError::Validation(errors))
+            Err(StartError::Validation(
+                inspection
+                    .diagnostics
+                    .iter()
+                    .map(|diagnostic| {
+                        let instance = diagnostic
+                            .instance
+                            .map(|index| self.instances[index].name.as_str());
+                        match instance {
+                            Some(name) => format!("{} for {name}", diagnostic.message),
+                            None => diagnostic.message.clone(),
+                        }
+                    })
+                    .collect(),
+            ))
         }
     }
     /// Validate the complete graph, then set up in dependency order.

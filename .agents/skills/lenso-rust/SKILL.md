@@ -7,7 +7,7 @@ description: Build or modify native lenso-rust plugins and applications with typ
 
 Keep business behavior in ordinary Rust functions and services. Core composes trusted native code; neither JSON contracts nor a kernel are required for local calls.
 
-1. Read the target Cargo manifest, selected source revision, one nearby plugin and its assembly. Verify the installed crate exports before copying an API. This skill's baseline is source revision `e5dfafb`, not a crates.io release; older `f10badf` has materially different startup and admission behavior.
+1. Read the target Cargo manifest, selected source revision, one nearby plugin and its assembly. Verify the installed crate exports before copying an API. Query the installed workspace's public exports and README first; the integrated source baseline is `c4c9a0b` (2026-10-19), not a crates.io release. Inspection is an additive working-branch API; verify `App::inspect` exists before consuming it. Older `f10badf` has materially different startup and admission behavior.
 2. Model each dependency with the **exact** `Handle<Service>` obtained from the installed `Instance`. Declare `handle.key()` in `Plugin::dependencies`; resolve with `Setup::get`. Names and service types do not select instances. Capture handles before moving instances into `App::with`.
 3. Let setup acquire resources and immediately register owned cleanup before the next fallible operation or await. Borrowed resources retain their original owner. Keep config/validation free of resource acquisition.
 4. Admit external work once at its outer service/host entry with `WorkGate`; retain the guard through awaits and dependency work. Internal Log/Cache calls must not reenter that gate. A retained `Arc` is not an admission permit.

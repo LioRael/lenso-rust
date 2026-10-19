@@ -63,6 +63,48 @@ startup order. `App::install`, `App::reserve`, and `App::bind` remain available
 for compatibility and forward declarations. Every reservation must be bound;
 foreign handles and duplicate bindings are pre-start errors.
 
+`App::inspect(&self)` exposes the same synchronous preflight used by `start`,
+without consuming the builder, requiring Tokio, invoking setup, connecting to
+Runtime, or acquiring plugin resources. Plugin `validate` and `dependencies`
+hooks remain trusted code and must be free of resource acquisition. `start`
+checks again; a snapshot does not freeze plugin interior state or environment.
+
+```rust
+use lenso_plugin_core::{App, CheckStatus};
+let app = App::new();
+let report = app.inspect();
+assert!(report.is_valid());
+assert_eq!(report.checks[0].status, CheckStatus::Passed);
+let json = serde_json::to_value(&report)?;
+assert_eq!(json["checks"][1]["status"], "not-run");
+# Ok::<(), serde_json::Error>(())
+```
+
+Run the public static consumer with
+`cargo run --locked -p lenso-plugin-core --example inspect`; its setup panics if
+invoked and the process needs no Tokio runtime.
+
+The serializable `Inspection` shape has `schema_version: 1`, `instances`,
+`startup_order`, `diagnostics`, and `checks`. Check names/statuses explicitly
+separate `preflight` (`passed`/`failed`) from `setup` and `runtime-connection`
+(`not-run`) and `session-status` (`unsupported`). No native `dev`, session status,
+or remote `call` API is supplied. A host wanting a persistent development session
+must own startup, identity, transport, admission, readiness, and shutdown; static
+inspection cannot prove any of those runtime properties.
+
+Diagnostics have a stable snake_case `code`, optional owning `instance` index,
+optional declaration `dependency_index`, closed cycle `path`, and fixed `message`.
+Indices resolve against `instances` in insertion order; missing/foreign handles
+have `target: null` because Core cannot safely invent their names. Cycle paths
+include the repeated first node and are discovered even if another edge is
+missing. `startup_order` is empty on any error. Duplicate edges remain visible
+and harmless. Consumers should tolerate future diagnostic codes. No key addresses,
+plugin error causes, configuration values, or panic payloads enter the report.
+Caller-supplied instance names are metadata and must not contain secrets. Host
+panic hooks may independently log panic payloads; Core does not replace them.
+`StartError::Validation(Vec<String>)` remains compatible for existing consumers;
+use `inspect` for structured details.
+
 Optional `Config<T>` resolves a serde `Deserialize` type without introducing a
 configuration language. Serde attributes own defaults. Explicit JSON must be an
 object; specifically selected environment values are JSON, so strings require

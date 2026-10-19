@@ -1,6 +1,6 @@
 # Native composition and lifecycle
 
-Evidence: `crates/plugin-core/src/lib.rs`, `src/config.rs`, and the crate README at `e5dfafb`. Prefer those local files over old portable/linked/process examples. The shortest complete plugin is the README's Prefix/Greeting example; it is compiled by `cargo test -p lenso-plugin-core --doc --locked`. The two-source composition sample is `crates/log-plugins/examples/offline.rs`. Its unguarded synchronous aggregator is not a template for retained-service admission, and its final shutdown `?` does not retain simultaneous business/cleanup errors:
+Evidence: `crates/plugin-core/src/lib.rs`, `src/config.rs`, and the crate README at integrated `c4c9a0b` (verify installed exports first). Prefer those local files over old portable/linked/process examples. The shortest complete plugin is the README's Prefix/Greeting example; it is compiled by `cargo test -p lenso-plugin-core --doc --locked`. The two-source composition sample is `crates/log-plugins/examples/offline.rs`. Its unguarded synchronous aggregator is not a template for retained-service admission, and its final shutdown `?` does not retain simultaneous business/cleanup errors:
 
 ```sh
 cargo run --locked -p lenso-log-plugins --example offline
@@ -26,7 +26,7 @@ Shutdown seals new admission → stops **all** entrances → waits for admitted 
 
 Retained service methods must participate in this admission discipline. Core cannot instrument arbitrary Rust calls. If background work outlives its caller, transfer/retain the accepted guard until that work and its resource use finish. Do not admit it a second time after shutdown has sealed the gate. A blocked setup, guard, cleanup or non-yielding task has no automatic universal timeout.
 
-At `e5dfafb`, Core owns startup in a Tokio task. Cancellation of the waiting future does not abandon setup: it finishes and shuts down an app that was not acknowledged. Returned setup failures **and unwind panics** roll back callbacks, including partial setup. Validation/dependency unwind failures happen before setup. This differs from the old `f10badf` startup, which was not cancellation-safe. Runtime termination and abort-on-panic remain outside the guarantee.
+At integrated `c4c9a0b`, Core owns startup in a Tokio task. Cancellation of the waiting future does not abandon setup: it finishes and shuts down an app that was not acknowledged. Returned setup failures **and unwind panics** roll back callbacks, including partial setup. Validation/dependency unwind failures happen before setup. This differs from the old `f10badf` startup, which was not cancellation-safe. Runtime termination and abort-on-panic remain outside the guarantee.
 
 Shutdown and early disposal share owned completion across concurrent/cancelled waiters. Dropping an acknowledged `RunningApp` still does not run async cleanup. Keep Tokio alive until completion. Early disposal does not seal the gate; coordinate dependents first. Preserve `StartError::Setup { source, cleanup, .. }` and `ShutdownError.failures`; only expose approved safe error classifications at external entries.
 
@@ -37,3 +37,7 @@ Shutdown and early disposal share owned completion across concurrent/cancelled w
 Use `.diagnostic_field("/field")` for safe paths and `.sensitive("/credentials")` for sensitive subtrees. Keep original values and serde error messages out of diagnostics. Do not copy TS `bindConfig`, Standard Schema, or Engine APIs into Rust.
 
 Focused evidence exists in `tests/startup.rs`, `admission.rs`, `early_cleanup.rs`, `config.rs` and `validation.rs`; select the test relevant to the change.
+
+Static preflight: when installed, `App::inspect(&self)` returns structured diagnostics
+and check execution scope without setup. It invokes trusted validation/dependency
+hooks and cannot certify resource availability or a running development session.
