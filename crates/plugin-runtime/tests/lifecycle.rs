@@ -356,3 +356,24 @@ async fn cancelling_after_runtime_delivery_is_queued_cleans_unacknowledged_app()
         .unwrap()
         .forget();
 }
+
+#[test]
+fn static_inspection_validates_runtime_options_without_connecting_or_tokio() {
+    let options = || HostOptions {
+        namespace: "test".into(),
+        service: "native".into(),
+        instance: "static".into(),
+        port: 1,
+        contract: json!({"version":"1","methods":{}}),
+        max_concurrency: 8,
+    };
+    let mut app = App::new();
+    app.install("runtime", RuntimePlugin::new(options(), 1000));
+    assert!(app.inspect().is_valid());
+    let mut invalid = App::new();
+    invalid.install("runtime", RuntimePlugin::new(options(), 0));
+    assert_eq!(
+        invalid.inspect().diagnostics[0].code,
+        lenso_plugin_core::DiagnosticCode::InvalidConfig
+    );
+}
