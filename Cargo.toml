@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/plugin-core",
+    "crates/web-axum",
     "crates/log-plugins",
     "crates/log",
     "crates/cache",
