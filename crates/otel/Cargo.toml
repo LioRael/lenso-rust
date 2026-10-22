@@ -1,0 +1,28 @@
+[package]
+name = "lenso-otel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+[dependencies]
+lenso-plugin-core.workspace = true
+lenso-log.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+opentelemetry = "0.32"
+opentelemetry_sdk = "0.32"
+opentelemetry-otlp = { version = "0.32", default-features = false, features = ["trace", "http-proto", "reqwest-blocking-client"] }
+[dev-dependencies]
+opentelemetry_sdk = { version = "0.32", features = ["testing"] }
+serde.workspace = true
+serde_json.workspace = true
+lenso-tasks = { path = "../tasks" }
+rusqlite = "=0.38.0"
+tempfile = "3"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json"] }
+async-trait = "0.1"
+bytes = "1"
+http = "1"
+opentelemetry-http = "0.32"
+opentelemetry-proto = { version = "0.32", features = ["gen-tonic-messages", "trace"] }
+prost = "0.14"

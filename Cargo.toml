@@ -2,6 +2,7 @@
 members = [
     "crates/plugin-core",
     "crates/web-axum",
+    "crates/otel",
     "crates/log-plugins",
     "crates/log",
     "crates/cache",
