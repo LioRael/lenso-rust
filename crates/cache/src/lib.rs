@@ -350,14 +350,16 @@ impl<V: Serialize + DeserializeOwned + Send + Sync + 'static> MemoryCache<V> {
     ) -> Result<WriteOutcome, CacheError> {
         let address = self.address(key)?;
         let ttl = self.ttl(ttl)?;
+        if ttl.is_zero() {
+            let mut state = self.state()?;
+            state.fence(&address);
+            state.remove(&address);
+            return Ok(WriteOutcome::Skipped);
+        }
         drop(self.state()?);
         let bytes = self.encode(&address, &value)?;
         let mut state = self.state()?;
         state.fence(&address);
-        if ttl.is_zero() {
-            state.remove(&address);
-            return Ok(WriteOutcome::Skipped);
-        }
         state.store(address, bytes, Instant::now() + ttl, &self.inner.config);
         Ok(WriteOutcome::Stored)
     }

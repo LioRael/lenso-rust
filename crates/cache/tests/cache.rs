@@ -257,6 +257,15 @@ async fn loader_errors_are_sanitized_with_explicit_cause() {
     assert!(!format!("{error:?} {error}").contains("private"));
     assert!(error.source().is_none());
     assert_eq!(error.loader_cause().unwrap().to_string(), "private data");
+    assert_eq!(cache.get("k").unwrap(), None);
+    assert_eq!(
+        cache
+            .get_or_set("k", || value("retry"), None)
+            .await
+            .unwrap(),
+        "retry"
+    );
+    assert_eq!(cache.get("k").unwrap(), Some("retry".into()));
     cache.close().await.unwrap();
 }
 
@@ -390,3 +399,41 @@ async fn close_joins_cooperative_loader_before_returning() {
 }
 
 use std::error::Error;
+
+#[tokio::test]
+async fn zero_ttl_set_deletes_and_fences_without_serializing_oversized_value() {
+    let cache = MemoryCache::<String>::new(CacheConfig {
+        max_value_bytes: 8,
+        ..CacheConfig::default()
+    })
+    .unwrap();
+    cache.set("hit", "old".into(), None).unwrap();
+    assert_eq!(
+        cache
+            .set("hit", "x".repeat(100), Some(Duration::ZERO))
+            .unwrap(),
+        WriteOutcome::Skipped
+    );
+    assert_eq!(cache.get("hit").unwrap(), None);
+    let (finish, wait) = oneshot::channel();
+    let pending = cache.get_or_set(
+        "pending",
+        || async move {
+            wait.await.unwrap();
+            value("old").await
+        },
+        None,
+    );
+    tokio::pin!(pending);
+    admit(pending.as_mut()).await;
+    assert_eq!(
+        cache
+            .set("pending", "x".repeat(100), Some(Duration::ZERO))
+            .unwrap(),
+        WriteOutcome::Skipped
+    );
+    finish.send(()).unwrap();
+    assert_eq!(pending.await.unwrap(), "old");
+    assert_eq!(cache.get("pending").unwrap(), None);
+    cache.close().await.unwrap();
+}

@@ -85,3 +85,20 @@ assert!(cache.get("key").is_err());
 
 Not implemented: Redis/DB/Runtime, JSON envelope interoperability, failure-open
 backend policy, runtime validators, remote generations, or permissions.
+
+## Business consumer evidence
+
+`cache-native` installs the existing cache and a batch-summary business plugin
+using an exact Core handle. Its loader reads `examples/fixtures/batch.txt` through
+Tokio filesystem I/O and parses the records into a count and total. Four business
+requests (two concurrent cold requests, one warm hit, and one after explicit
+invalidation) perform two file reads and return count 3 / total 16. The read
+counter sits at the actual filesystem call, not in a mock backend. This proves
+process-local reuse, not a disk-cache speedup or distributed consistency.
+The loader retains the admitted work guard; Core drains work and closes the
+cache, and the example asserts retained services reject calls after shutdown.
+
+Run `cargo test -p lenso-cache --all-targets --locked` to execute this consumer
+alongside the TTL, capacity, error, cancellation and invalidation regressions.
+Zero-TTL `set` fences/deletes without serializing the unused supplied value,
+including when that value would exceed the configured serialization limit.
