@@ -3,7 +3,11 @@
 use lenso_plugin_core::{BoxError, CleanupPhase, Plugin, Setup, WorkGate};
 use rusqlite::{params, Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
-use std::{path::Path, sync::{Arc, Mutex}, time::Duration};
+use std::{
+    path::Path,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 /// Sanitized failures; never include SQL, paths or indexed content.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -22,39 +26,82 @@ pub enum SearchError {
     Storage,
 }
 type Result<T> = std::result::Result<T, SearchError>;
-fn db<T>(r: rusqlite::Result<T>) -> Result<T> { r.map_err(|_| SearchError::Storage) }
+fn db<T>(r: rusqlite::Result<T>) -> Result<T> {
+    r.map_err(|_| SearchError::Storage)
+}
 
 /// Exact partition. The host must derive this from current authorization on EVERY call.
 /// This value and cursors are not credentials.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Scope { pub namespace: String, pub tenant: String, pub owner: String }
+pub struct Scope {
+    pub namespace: String,
+    pub tenant: String,
+    pub owner: String,
+}
 impl Scope {
     pub fn new(namespace: &str, tenant: &str, owner: &str) -> Self {
-        Self { namespace: namespace.into(), tenant: tenant.into(), owner: owner.into() }
+        Self {
+            namespace: namespace.into(),
+            tenant: tenant.into(),
+            owner: owner.into(),
+        }
     }
     fn validate(&self) -> Result<()> {
-        name(&self.namespace)?; name(&self.tenant)?; name(&self.owner)
+        name(&self.namespace)?;
+        name(&self.tenant)?;
+        name(&self.owner)
     }
 }
 fn name(s: &str) -> Result<()> {
-    if s.is_empty() || s.len() > 256 || s.chars().any(char::is_control) { Err(SearchError::InvalidInput) } else { Ok(()) }
+    if s.is_empty() || s.len() > 256 || s.chars().any(char::is_control) {
+        Err(SearchError::InvalidInput)
+    } else {
+        Ok(())
+    }
 }
 /// A projection of an authoritative note, keyed within its exact scope.
-pub struct Note<'a> { pub id: &'a str, pub title: &'a str, pub body: &'a str }
+pub struct Note<'a> {
+    pub id: &'a str,
+    pub title: &'a str,
+    pub body: &'a str,
+}
 #[derive(Debug)]
-pub struct Hit { pub id: String, pub title: String, pub summary: String }
+pub struct Hit {
+    pub id: String,
+    pub title: String,
+    pub summary: String,
+}
 #[derive(Debug)]
-pub struct Page { pub hits: Vec<Hit>, pub next_cursor: Option<String> }
+pub struct Page {
+    pub hits: Vec<Hit>,
+    pub next_cursor: Option<String>,
+}
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Cursor { version: u8, scope: Scope, query: String, revision: i64, offset: usize, limit: usize }
+struct Cursor {
+    version: u8,
+    scope: Scope,
+    query: String,
+    revision: i64,
+    offset: usize,
+    limit: usize,
+}
 
 fn fts(conn: &Connection) -> Result<()> {
-    let enabled: i64 = db(conn.query_row("SELECT sqlite_compileoption_used('ENABLE_FTS5')", [], |r| r.get(0)))?;
-    if enabled == 0 { return Err(SearchError::Fts5Unavailable); }
+    let enabled: i64 = db(conn.query_row(
+        "SELECT sqlite_compileoption_used('ENABLE_FTS5')",
+        [],
+        |r| r.get(0),
+    ))?;
+    if enabled == 0 {
+        return Err(SearchError::Fts5Unavailable);
+    }
     Ok(())
 }
-fn configure(conn: &Connection) -> Result<()> { db(conn.busy_timeout(Duration::from_secs(2)))?; fts(conn) }
+fn configure(conn: &Connection) -> Result<()> {
+    db(conn.busy_timeout(Duration::from_secs(2)))?;
+    fts(conn)
+}
 
 /// Explicit DDL step on a host-selected application database. Never called by startup.
 pub fn provision(path: impl AsRef<Path>) -> Result<()> {
@@ -80,16 +127,32 @@ pub fn provision(path: impl AsRef<Path>) -> Result<()> {
 
 /// Synchronous, serialized SQLite service. Use on a blocking thread for large workloads.
 /// Operations hold admission and the connection until all I/O settles.
-pub struct Search { connection: Mutex<Option<Connection>>, gate: WorkGate }
+pub struct Search {
+    connection: Mutex<Option<Connection>>,
+    gate: WorkGate,
+}
 impl Search {
-    pub fn open(path: impl AsRef<Path>) -> Result<Self> { Self::open_with_gate(path.as_ref(), WorkGate::default()) }
+    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        Self::open_with_gate(path.as_ref(), WorkGate::default())
+    }
     fn open_with_gate(path: &Path, gate: WorkGate) -> Result<Self> {
-        let conn = db(Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE))?;
+        let conn = db(Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE,
+        ))?;
         configure(&conn)?;
-        let version: i64 = conn.query_row("SELECT version FROM lenso_search_meta", [], |r| r.get(0)).map_err(|_| SearchError::NotProvisioned)?;
-        if version != 1 { return Err(SearchError::NotProvisioned); }
-        conn.prepare("SELECT rowid FROM lenso_search_fts LIMIT 0").map_err(|_| SearchError::NotProvisioned)?;
-        Ok(Self { connection: Mutex::new(Some(conn)), gate })
+        let version: i64 = conn
+            .query_row("SELECT version FROM lenso_search_meta", [], |r| r.get(0))
+            .map_err(|_| SearchError::NotProvisioned)?;
+        if version != 1 {
+            return Err(SearchError::NotProvisioned);
+        }
+        conn.prepare("SELECT rowid FROM lenso_search_fts LIMIT 0")
+            .map_err(|_| SearchError::NotProvisioned)?;
+        Ok(Self {
+            connection: Mutex::new(Some(conn)),
+            gate,
+        })
     }
     fn with<T>(&self, f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
         let _work = self.gate.enter().map_err(|_| SearchError::Closed)?;
@@ -114,7 +177,13 @@ impl Search {
     /// All whitespace-separated terms must match (literal FTS phrases; no query operators).
     /// Title substring matches sort first, then binary note ID; no cross-scope BM25 statistics.
     /// Pagination is capped at 10,000 results and invalidated by ANY database mutation.
-    pub fn query(&self, scope: &Scope, query: &str, limit: usize, cursor: Option<&str>) -> Result<Page> {
+    pub fn query(
+        &self,
+        scope: &Scope,
+        query: &str,
+        limit: usize,
+        cursor: Option<&str>,
+    ) -> Result<Page> {
         self.with(|conn| {
             scope.validate()?;
             let query = query.trim();
@@ -132,7 +201,7 @@ impl Search {
             } else { 0 };
             let take = limit.min(10000 - offset);
             let mut stmt = db(tx.prepare("SELECT n.id,n.title,snippet(lenso_search_fts,1,'','',' … ',24) FROM lenso_search_fts JOIN lenso_search_notes n ON n.rowid=lenso_search_fts.rowid WHERE lenso_search_fts MATCH ?1 AND n.namespace=?2 AND n.tenant=?3 AND n.owner=?4 ORDER BY (instr(lower(n.title),lower(?5))>0) DESC,n.id COLLATE BINARY ASC LIMIT ?6 OFFSET ?7"))?;
-            let rows = db(stmt.query_map(params![expression,scope.namespace,scope.tenant,scope.owner,query,take+1,offset], |r| Ok(Hit { id:r.get(0)?,title:r.get(1)?,summary:r.get::<_,String>(2)?.chars().take(512).collect() })))?;
+            let rows = db(stmt.query_map(params![expression,scope.namespace,scope.tenant,scope.owner,query,(take+1) as i64,offset as i64], |r| Ok(Hit { id:r.get(0)?,title:r.get(1)?,summary:r.get::<_,String>(2)?.chars().take(512).collect() })))?;
             let mut hits = db(rows.collect::<rusqlite::Result<Vec<_>>>())?;
             let more = hits.len() > take && offset + take < 10000;
             hits.truncate(take);
@@ -144,24 +213,34 @@ impl Search {
     /// Waits for synchronous operations, then closes; retained services reject further work.
     pub fn close(&self) -> Result<()> {
         let mut lock = self.connection.lock().map_err(|_| SearchError::Storage)?;
-        if let Some(conn) = lock.take() { conn.close().map_err(|_| SearchError::Storage)?; }
+        if let Some(conn) = lock.take() {
+            conn.close().map_err(|_| SearchError::Storage)?;
+        }
         Ok(())
     }
 }
-pub struct SearchPlugin { path: std::path::PathBuf }
+pub struct SearchPlugin {
+    path: std::path::PathBuf,
+}
 impl SearchPlugin {
-    pub fn new(path: impl Into<std::path::PathBuf>) -> Self { Self { path:path.into() } }
+    pub fn new(path: impl Into<std::path::PathBuf>) -> Self {
+        Self { path: path.into() }
+    }
 }
 impl Plugin for SearchPlugin {
     type Service = Search;
-    fn validate(&self) -> std::result::Result<(),BoxError> {
-        if self.path.as_os_str().is_empty() { return Err(SearchError::InvalidInput.into()); }
+    fn validate(&self) -> std::result::Result<(), BoxError> {
+        if self.path.as_os_str().is_empty() {
+            return Err(SearchError::InvalidInput.into());
+        }
         Ok(())
     }
-    async fn setup(self, setup: &mut Setup) -> std::result::Result<Arc<Search>,BoxError> {
-        let search = Arc::new(Search::open_with_gate(&self.path,setup.work_gate())?);
+    async fn setup(self, setup: &mut Setup) -> std::result::Result<Arc<Search>, BoxError> {
+        let search = Arc::new(Search::open_with_gate(&self.path, setup.work_gate())?);
         let cleanup = search.clone();
-        setup.on_cleanup(CleanupPhase::Resources,move || async move { cleanup.close().map_err(Into::into) });
+        setup.on_cleanup(CleanupPhase::Resources, move || async move {
+            cleanup.close().map_err(Into::into)
+        });
         Ok(search)
     }
 }

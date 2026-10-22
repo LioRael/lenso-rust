@@ -1,55 +1,61 @@
 # Candidate verification — 2026-10-22
 
 Base: `126b778b8a4e8c18ca7055dbe358d8b0f5afbfd2`.
-Runtime SDK revision remains `dd0eb084e490e5e4bda05ce0dbb503f3aae50590`.
-The source checkout was clean and was cloned without hard links into task-34.
+Runtime SDK remains `dd0eb084e490e5e4bda05ce0dbb503f3aae50590`.
+Initial frozen candidate: `ff2f746f47303d62d7d922069ec3365bb6463039`.
+The source checkout was clean and cloned without hard links into task-34.
 Only this candidate's Search crate and minimal workspace/lock registration changed.
 
-## Executed
+## Toolchain failure and authorized resolution
 
-- `git diff --check`: passed.
-- System SQLite smoke, using DDL and SELECT extracted directly from
-  `src/lib.rs`, on a disposable `/tmp/task34-search-smoke.sqlite` database:
+Initial `cargo test --offline -p lenso-search --no-run` failed in the mise
+launcher with `Operation not permitted (os error 1)`, before Rust compilation.
+PATH resolves Cargo to `~/.local/share/mise/command-wrappers/bin/cargo`, a symlink
+to `/opt/homebrew/bin/mise`. This was a sandbox execution failure, not an
+explicit approval rejection. The exact prohibited syscall/path was not exposed.
+
+After parent clarification, the same command was submitted through the normal
+`require_escalated` approval mechanism and permitted. No toolchain path,
+environment, cache location or dependency version was changed. Offline Cargo
+then compiled and reported E0277: `usize` does not implement SQLite `ToSql`.
+The follow-up fixes the bounded pagination parameters to use `i64` and applies
+Rust formatting. The frozen candidate is retained in Git history, not amended.
+
+## Executed successfully
+
+- `cargo test --offline --locked -p lenso-search`: 3 integration tests passed.
+  Covers actual bundled FTS5 hits/order, namespace/tenant/owner isolation,
+  cross-scope/query/page-size and stale cursor rejection, hostile identifiers,
+  literal query operators, input limits, pagination, update/delete, reopening,
+  absent-file startup and retained-service rejection after shutdown.
+- `cargo run --offline --locked -p lenso-search --example notes_search`: passed;
+  printed Alice's hit and `Reopened: Alice update/delete and Bob isolation verified`.
+  Uses public APIs, App lifecycle and only a temporary application database.
+- `cargo fmt --all`: succeeded and changed only Search files.
+- Initial system SQLite smoke used DDL and SELECT extracted from `src/lib.rs`:
   title match ID 2 sorted before body-only ID 1; Bob's secret did not appear.
-  Separate SQLite processes reopened the same database. Updating Alice ID 2
-  to Python and deleting Alice ID 1 gave:
-  `remaining alice rust|0`, `bob preserved|1`, `update indexed|1`, `revision|5`.
-  The SELECT used SQLite `.parameter` bindings for all seven parameters.
-  This verifies SQL behavior with the system SQLite, not Rust or bundled SQLite.
+  Separate processes reopened the disposable database; updating/deleting Alice
+  yielded `remaining alice rust|0`, `bob preserved|1`, `update indexed|1`.
 
-## Blocked / unverified
+## Remaining limitations
 
-First attempted compilation:
-`cargo test --offline -p lenso-search --no-run`
-was rejected by the local mise launcher with `Operation not permitted (os error 1)`.
-No alternate compiler path, escalation, dependency installation, or network fetch
-was attempted. This was a local execution failure, not an auto-review rejection.
-The initial scripted Python workspace edit hit the same launcher failure; the
-registration was subsequently written using the normal file patch tool.
+Missing-FTS5 failure is implemented but was not exercised against a build without
+FTS5. Concurrent Search shutdown/drain stress, the 10,000-hit cap and maximum
+summary/document sizes are not execution-verified. No performance benchmark,
+Chinese segmentation, vector search, automatic source database synchronization,
+publication or deployment is claimed.
 
-The lockfile addition was written manually using only already locked dependencies;
-Cargo has not validated it. Rust compilation, formatting, Clippy, all Rust tests,
-and the public example remain unverified. This candidate requires these checks
-in an authorized toolchain environment before integration:
+## Final repository checks
 
-```
-cargo fmt --all
-cargo test --locked -p lenso-search
-cargo run --locked -p lenso-search --example notes_search
-cargo test --locked -p lenso-plugin-core --test admission
-cargo test --workspace --locked
-cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-cargo fmt --all --check
-```
+- `cargo test --offline --workspace --locked`: exit 0, including Core admission
+  regressions and Search integration tests. Existing same-name example output
+  collision warnings were emitted; pre-existing ignored fixtures/docs remained
+  ignored. Optional PostgreSQL integration suites were not enabled by this command.
+- `cargo clippy --offline --workspace --all-targets --all-features --locked -- -D warnings`:
+  exit 0. This compiles optional feature targets, not their external-service tests.
+- `cargo fmt --all --check`: exit 0.
+- `git diff --check`: passed before the follow-up commit.
 
-`tests/search.rs` covers real FTS hits/order, namespace/tenant/owner isolation,
-cross-scope/query/page-size and stale cursor rejection, parameterized hostile
-identifiers and literal query operators, empty/oversized inputs, pagination,
-update/delete, reopen persistence, absent-file startup, and retained-service
-shutdown rejection. No actual Rust test result is claimed.
-
-Missing-FTS5 failure is implemented via the SQLite compile-option check but was
-not exercised against a build without FTS5. Concurrent shutdown/drain stress,
-10,000-hit cap and maximum document/summary sizes are not execution-verified.
-No performance benchmark, Chinese segmentation, vector search, source database
-synchronization, publication or deployment is claimed.
+All Cargo invocations used the existing mise/Cargo path through normal approval.
+No pending or denied approval remains. Dependencies were available offline;
+Cargo accepted the locked workspace registration without changing Cargo.lock.
