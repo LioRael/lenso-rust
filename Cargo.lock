@@ -750,6 +750,10 @@ name = "lenso-audit"
 version = "0.1.0"
 dependencies = [
  "lenso-plugin-core",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
  "tokio",
 ]
 

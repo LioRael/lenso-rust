@@ -176,3 +176,50 @@ are trusted adapter APIs, not a substitute for service validation/authorization.
 
 See [PARITY.md](PARITY.md) for TS alignment and omitted integrations, and
 [CHECKS.md](CHECKS.md) for actual verification and review evidence.
+
+## Optional SQLite persistence
+
+Enable `sqlite` for `SqliteAuditRepository::open(path).await`. Open at host startup,
+then inject its `Arc` into the existing `AuditService` or `AuditPlugin` repository
+handle. No Core or authorization policy change is required. All database work
+runs on Tokio's blocking pool, behind one connection mutex per repository. Clones
+share that connection; separate opens coordinate uniqueness through SQLite.
+Dropping the last clone closes the connection after accepted operations settle.
+Hosts must retain their work guard and await calls before shutdown. Cancelling a
+waiter cannot undo a write already submitted to the blocking pool.
+
+The versioned `lenso_audit_v1` table stores validated event snapshots as JSON.
+A structured serialized scope key distinguishes absent tenants, literal `null`
+and delimiter-containing IDs. The primary key atomically classifies concurrent
+inserts; update/delete triggers reject accidental mutation. These triggers are
+not tamper evidence against a database owner. Existing databases are trusted
+host resources; this adapter does not repair incompatible schemas.
+
+Scope selection and descending ordering use a database index. Additional filters
+and exclusive cursors reuse the existing native predicate while streaming rows;
+memory is bounded by the requested page, but a selective query can scan the
+entire scope. No global list is exposed. Payload serialization is an internal
+v1 storage format, not a promised TS wire representation.
+
+Commits use `synchronous=FULL`. Reopening a file recovers committed audit rows.
+This alone does not verify filesystem/power-loss durability, so `durable_intents`
+remains false and strict `prepare` returns `StrictUnavailable`. The adapter does
+not claim business/audit atomicity, exactly-once effects, encryption, or a
+reconciliation worker. Provider errors are sanitized by `AuditService`; startup
+and direct trusted repository calls return provider errors to the resource owner.
+
+Continue to send events through `AuditService`: its approved Boolean/integer/enum
+summary projection excludes sensitive fields before storage. Rejected inputs are
+not persisted; there is no raw-payload logging or post-storage redaction layer.
+Direct repository methods remain trusted APIs and bypass that policy.
+
+```sh
+cargo run --locked -p lenso-audit --features sqlite --example permission-change
+```
+
+The example updates an actual temporary SQLite membership row from reader to
+editor and records actor, tenant/project scope, target, action, request correlation,
+and intent/outcome. It uses only obvious test identities. Its business and audit
+commits are separate: after an interrupted effect/outcome, reconcile the stable
+operation ID rather than replaying the change. It is not a production permission
+policy or strict intent consumer.

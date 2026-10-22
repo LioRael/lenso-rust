@@ -25,7 +25,8 @@ possibly older local TS checkout. No TS source or other Rust crate was modified.
 | Exact plugin dependencies / preflight | Implemented | `AuditPlugin` over existing plugin-core handles, optional exact reporter, lookalike rejected before acquisition |
 | Shutdown / rollback | Native adaptation | Host work guard through effect; no dependency gate reentry; own service sealed after drain, providers remain owner-managed |
 | Memory validation adapter | Added | Explicit event capacity, no eviction, always nondurable; not a TS persistent adapter replacement |
-| Postgres / SQLite / D1 and migrations | Not implemented | No real provider persistence or deployment-durability claim |
+| SQLite persistence | Implemented behind `sqlite` | Versioned append-only table, reopen recovery, concurrent uniqueness; no deployment-durability attestation |
+| Postgres / D1 | Not implemented | No provider or deployment-durability claim |
 | Auth adapter / audience verification | Not implemented | Application implements `AuditAuthority`; tests use a scoped/revocable fixture |
 | OTel counter and Log reporter adapter | Not implemented | Fixed `AuditDiagnostic` / `AuditReporter` seam is provided; no implicit Log/OTel dependency |
 | Tasks reconciliation adapter | Not implemented | Application may query intents and append stable linked outcomes; no queue, outbox or effect replay |
@@ -81,3 +82,5 @@ five plugin branches:
 package versions/resolutions are unchanged. There is no new registry or Git
 dependency and no workspace-level `lenso-audit` alias. All other changes are
 under `crates/audit/`, including examples and this documentation.
+
+SQLite follow-up base: verified upstream main `c31a47b52522302c3365855eaff47d970ac985e7`. Only Audit files and its Cargo.lock dependency list change; existing dependency versions and Core remain unchanged.
