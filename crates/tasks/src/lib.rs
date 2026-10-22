@@ -2,6 +2,9 @@
 #![doc = include_str!("../README.md")]
 mod owned_worker;
 pub use owned_worker::{Worker, WorkerConfig, WorkerPlugin};
+
+mod transaction;
+pub use transaction::SqliteTaskTransaction;
 mod plugin;
 mod store;
 mod worker;
@@ -43,6 +46,17 @@ pub enum TaskError {
     #[cfg(feature = "postgres")]
     #[error("task PostgreSQL queue identity changed")]
     QueueIdentityChanged,
+    #[error("this operation requires the owned SQLite provider")]
+    SqliteRequired,
+    #[error("transaction scope failed; no commit attempted")]
+    TransactionAborted,
+    #[error("SQLite commit was not confirmed; inspect the original business key before replay")]
+    CommitUnconfirmed(#[source] rusqlite::Error),
+    #[error("transaction rollback failed after {source}")]
+    RollbackFailed {
+        source: Box<TaskError>,
+        rollback: rusqlite::Error,
+    },
     #[error("task runtime failed")]
     Runtime,
     #[error("task claim is no longer owned")]
@@ -298,18 +312,7 @@ impl Tasks {
         input: Value,
         options: EnqueueOptions,
     ) -> Result<i64, TaskError> {
-        let definition = self.tasks.get(task).ok_or(TaskError::UnknownTask)?.clone();
-        if !valid_json(&input) || !(definition.validate)(input.clone()) {
-            return Err(TaskError::InvalidInput);
-        }
-        if options.run_at.is_some_and(|at| at < 0)
-            || options
-                .deduplication_key
-                .as_ref()
-                .is_some_and(|key| key.is_empty() || key.len() > 256)
-        {
-            return Err(TaskError::InvalidOptions);
-        }
+        let definition = prepare_enqueue(&self.tasks, task, &input, &options)?;
         self.admitted(move |db| db.enqueue(&definition, &input, &options))
             .await
     }
@@ -364,4 +367,25 @@ pub(crate) fn valid_json(value: &Value) -> bool {
         }
     }
     depth(value, 33) && serde_json::to_vec(value).is_ok_and(|bytes| bytes.len() <= 65_536)
+}
+
+pub(crate) fn prepare_enqueue(
+    tasks: &BTreeMap<String, Task>,
+    task: &str,
+    input: &Value,
+    options: &EnqueueOptions,
+) -> Result<Task, TaskError> {
+    let definition = tasks.get(task).ok_or(TaskError::UnknownTask)?.clone();
+    if !valid_json(input) || !(definition.validate)(input.clone()) {
+        return Err(TaskError::InvalidInput);
+    }
+    if options.run_at.is_some_and(|at| at < 0)
+        || options
+            .deduplication_key
+            .as_ref()
+            .is_some_and(|key| key.is_empty() || key.len() > 256)
+    {
+        return Err(TaskError::InvalidOptions);
+    }
+    Ok(definition)
 }
