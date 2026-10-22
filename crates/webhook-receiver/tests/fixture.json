@@ -1,0 +1,1 @@
+{"body": "{\"version\":1,\"id\":\"evt_1\",\"type\":\"order.created\",\"source\":\"partner\",\"occurredAt\":\"2026-10-22T00:00:00Z\",\"data\":{\"order\":\"order_1\"}}", "timestamp": "1792627200", "signature": "v1;kid=fixture;mac=a68c36531d105162388899ddbc392296e6e1cb0146b785163edc415d261d282a"}
