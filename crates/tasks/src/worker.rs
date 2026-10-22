@@ -10,14 +10,17 @@ impl Tasks {
     /// The owned runner survives cancellation of its waiting caller. Shutdown
     /// drains it before releasing SQLite. A noncooperative handler can delay drain.
     pub async fn run_one(self: &Arc<Self>) -> Result<Option<JobStatus>, TaskError> {
+        self.spawn_one()?.await.map_err(|_| TaskError::Runtime)?
+    }
+    pub(crate) fn spawn_one(
+        self: &Arc<Self>,
+    ) -> Result<tokio::task::JoinHandle<Result<Option<JobStatus>, TaskError>>, TaskError> {
         let guard = self.gate.enter().map_err(|_| TaskError::Closed)?;
         let service = self.clone();
-        tokio::spawn(async move {
+        Ok(tokio::spawn(async move {
             let _guard = guard;
             service.execute().await
-        })
-        .await
-        .map_err(|_| TaskError::Runtime)?
+        }))
     }
     async fn execute(&self) -> Result<Option<JobStatus>, TaskError> {
         let tasks: Vec<_> = self.tasks.keys().cloned().collect();

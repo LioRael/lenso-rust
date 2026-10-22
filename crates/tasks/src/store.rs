@@ -10,7 +10,7 @@ mod postgres_pool;
 mod postgres_test_support;
 #[cfg(feature = "postgres")]
 pub use postgres_pool::PostgresOptions;
-mod sqlite;
+pub(crate) mod sqlite;
 #[cfg(feature = "postgres")]
 pub(crate) use postgres::provision as provision_postgres;
 pub(crate) use sqlite::provision;
@@ -18,6 +18,9 @@ pub(crate) use sqlite::provision;
 // Synchronous provider operations run only on the blocking pool. SQLite serializes
 // local operations; PostgreSQL leases pool slots. Both fence across connections.
 pub(crate) trait StoreConnection: Send {
+    fn sqlite(&mut self) -> Option<&mut sqlite::SqliteConnection> {
+        None
+    }
     fn close(self: Box<Self>) -> Result<(), TaskError>;
     fn enqueue(
         &mut self,

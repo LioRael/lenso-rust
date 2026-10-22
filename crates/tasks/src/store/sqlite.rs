@@ -13,8 +13,8 @@ const COLUMNS: &str =
 const DELAY: &str = "MIN(retry_max_ms, retry_delay_ms * (CASE WHEN retry_backoff = 1 THEN (1 << MIN(MAX(attempt - 1, 0), 30)) ELSE 1 END))";
 
 pub(crate) struct SqliteConnection {
-    connection: Connection,
-    queue: String,
+    pub(crate) connection: Connection,
+    pub(crate) queue: String,
 }
 use super::{Claim, StoreConnection};
 impl SqliteConnection {
@@ -89,6 +89,9 @@ fn status(row: &rusqlite::Row<'_>) -> rusqlite::Result<JobStatus> {
     })
 }
 impl StoreConnection for SqliteConnection {
+    fn sqlite(&mut self) -> Option<&mut Self> {
+        Some(self)
+    }
     fn close(self: Box<Self>) -> Result<(), TaskError> {
         self.connection.close().map_err(|(_, error)| error.into())
     }
@@ -101,19 +104,7 @@ impl StoreConnection for SqliteConnection {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if let Some(key) = &options.deduplication_key {
-            let existing: Option<(i64, String, String)> = transaction.query_row("SELECT id, task, input FROM lenso_task_job WHERE queue = ?1 AND dedup_key = ?2", params![self.queue, key], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
-            if let Some((id, name, raw)) = existing {
-                if name != task.name
-                    || serde_json::from_str::<Value>(&raw).ok().as_ref() != Some(input)
-                {
-                    return Err(TaskError::DeduplicationConflict);
-                }
-                return Ok(id);
-            }
-        }
-        transaction.execute(&format!("INSERT INTO lenso_task_job(queue, task, input, dedup_key, max_attempts, retry_delay_ms, retry_max_ms, retry_backoff, run_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, COALESCE(?9, {NOW}))"), params![self.queue, task.name, input.to_string(), options.deduplication_key, task.retry.max_attempts, task.retry.delay_ms, task.retry.max_delay_ms, task.retry.backoff, options.run_at])?;
-        let id = transaction.last_insert_rowid();
+        let id = enqueue_in_transaction(&transaction, &self.queue, task, input, options)?;
         transaction.commit()?;
         Ok(id)
     }
@@ -206,6 +197,35 @@ impl StoreConnection for SqliteConnection {
             Err(TaskError::ClaimLost)
         }
     }
+}
+
+pub(crate) fn enqueue_in_transaction(
+    transaction: &rusqlite::Transaction<'_>,
+    queue: &str,
+    task: &Task,
+    input: &Value,
+    options: &EnqueueOptions,
+) -> Result<i64, TaskError> {
+    if let Some(key) = &options.deduplication_key {
+        let existing: Option<(i64, String, String)> = transaction
+            .query_row(
+                "SELECT id, task, input FROM lenso_task_job WHERE queue = ?1 AND dedup_key = ?2",
+                params![queue, key],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+        if let Some((id, name, raw)) = existing {
+            if name != task.name || serde_json::from_str::<Value>(&raw).ok().as_ref() != Some(input)
+            {
+                return Err(TaskError::DeduplicationConflict);
+            }
+            return Ok(id);
+        }
+    }
+    transaction.execute(&format!("INSERT INTO lenso_task_job(queue, task, input, dedup_key, max_attempts, retry_delay_ms, retry_max_ms, retry_backoff, run_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, COALESCE(?9, {NOW}))"), params![queue, task.name, input.to_string(), options.deduplication_key, task.retry.max_attempts, task.retry.delay_ms, task.retry.max_delay_ms, task.retry.backoff, options.run_at])?;
+    let id = transaction.last_insert_rowid();
+
+    Ok(id)
 }
 
 #[cfg(test)]

@@ -201,3 +201,72 @@ and restart, queue identity mismatch, and session cleanup. TLS checks require
 verified encryption, reject untrusted certificates and hostname mismatch, and
 exercise reconnect and shutdown through the public plugin API. Ordinary workspace
 tests compile these fixtures but do not start PostgreSQL.
+
+## Explicit owned worker
+
+For an owned polling lifetime, install `WorkerPlugin::new(tasks_handle,
+WorkerConfig { concurrency: 4, idle_wait: Duration::from_millis(250) })` as
+another `Instance` in the same App. It depends on that exact Tasks handle and
+reuses `run_one`'s admitted execution path. No worker starts unless installed.
+The concurrency limit (1–64) bounds this worker's simultaneous accepted runs;
+other workers and manual `run_one` callers have independent limits. Each empty
+claim waits for `idle_wait` (nonzero), so delayed jobs and other processes are
+observed by polling. No local queue or enqueue notification channel is added.
+
+Retain the worker handle before startup and obtain `Arc<Worker>` via `app.get`.
+`worker.stop()` synchronously closes its claim admission and wakes idle lanes.
+`worker.join().await` drains accepted runs, is repeatable and survives dropped
+waiters. Stop does not cancel handlers or producers; pending jobs remain durable.
+A provider/runtime error stops further worker admission, joins other lanes and
+is returned by join and Core cleanup; handler failures retain ordinary task retry
+semantics. Core shutdown stops worker admission in Entrances, stops all other entrances,
+then drains WorkGate. Resources cleanup joins the worker before closing Tasks. Await shutdown while Tokio is
+alive. A noncooperative handler can delay both join and shutdown indefinitely.
+
+Runnable public consumer (new local file only, no external services):
+`cargo run --locked -p lenso-tasks --example owned -- /tmp/my-owned-worker.sqlite`.
+
+## SQLite business write and task acceptance
+
+`Tasks::sqlite_transaction` borrows the existing Tasks-owned SQLite connection
+exclusively and starts one IMMEDIATE transaction on Tokio's blocking pool. Its
+synchronous callback receives `&mut SqliteTaskTransaction<'_>` with parameterized
+`execute`, `query_row` and typed `enqueue`. The enqueue path shares task/input,
+options, deduplication and retry validation and the existing queue INSERT; it
+does not open another connection or start an inner transaction. Only the outer
+successful return confirms the staged IDs. PostgreSQL returns `SqliteRequired`;
+no generic transaction token or cross-provider atomicity is supplied.
+
+Provision business tables explicitly before startup, in the same SQLite file.
+The connection belongs to Tasks from startup through Core drain; business code
+only borrows the scoped interface. No raw connection, transaction or statement
+escapes. SQLite's authorizer rejects transaction/savepoint commands, ATTACH,
+DETACH and PRAGMA within the callback. SQL remains trusted application code,
+including responsibility for business authorization and schema integrity.
+Do not call Tasks recursively, block on asynchronous Tasks methods or perform
+external effects inside the callback. Unrelated clients and databases cannot
+participate in this transaction.
+
+Any SQL/enqueue error poisons the scope, rejects later statements and prevents
+commit even if caught by the callback. Callback errors and unwind panics roll
+back; rollback errors preserve the original error. COMMIT errors return
+`CommitUnconfirmed`, never automatically replay. Read the original business key
+before deciding whether a retry is safe. A dropped async waiter still leaves the
+admitted transaction running; Core drains it before closing the connection.
+This does not promise external effect idempotency or process survival.
+
+The runnable `report_transaction` consumer uses `examples/support/reports.rs`:
+`Reports::submit(owner, report_id, title)` checks the existing owner and immutable
+request, inserts a report request, enqueues its task and writes the job receipt
+in one transaction. Same-key retries return the original ID; a different owner
+or title, or another queue identity, returns no receipt and does not enqueue. `receipt` reads the original
+report key with an owner predicate. The owner must already be authenticated by
+the application. A real business row/mapping failure rolls back task acceptance,
+so no orphan-job compensation is required for this same-file write. Report
+execution remains at-least-once; the sample renderer only uppercases a heading.
+This is a local native business slice, not integration with a deployed report app.
+
+`cargo run --locked -p lenso-tasks --example report_transaction -- /tmp/new-report.sqlite`
+reserves a new file, provisions both schemas, submits a report through the
+service, repeats submission, verifies owner isolation and executes the task.
+It uses no user database, server, model or paid service.
