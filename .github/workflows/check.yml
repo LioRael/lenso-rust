@@ -27,6 +27,14 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo fmt --all --check
       - run: cargo test --workspace --locked
+      - name: Exercise Notifications HTTP fixture transport
+        run: cargo test --locked -p lenso-notifications --test http -- --ignored
+      - name: Exercise new public consumers and signing fixture
+        run: |
+          cargo run --locked -p lenso-search --example notes_search
+          cargo run --locked -p lenso-notifications --example order_confirmation
+          cargo run --locked -p lenso-webhook-receiver --example partner_order
+          node crates/webhook-receiver/tests/verify-fixture.mjs
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
   candidate:
     if: github.event_name == 'workflow_dispatch'
