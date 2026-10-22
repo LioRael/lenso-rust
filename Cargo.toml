@@ -15,6 +15,7 @@ members = [
     "crates/storage",
     "crates/media",
     "crates/realtime",
+    "crates/realtime-sse",
     "crates/events",
     "crates/limits",
     "crates/usage-quota",
