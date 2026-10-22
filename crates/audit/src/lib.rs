@@ -16,3 +16,8 @@ pub use memory::MemoryAuditRepository;
 #[cfg(feature = "plugin")]
 pub use plugin::AuditPlugin;
 pub use service::{AuditIntentReceipt, AuditService};
+
+#[cfg(feature = "sqlite")]
+mod sqlite;
+#[cfg(feature = "sqlite")]
+pub use sqlite::SqliteAuditRepository;

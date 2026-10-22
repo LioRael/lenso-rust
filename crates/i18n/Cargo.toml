@@ -1,0 +1,14 @@
+[package]
+name = "lenso-i18n"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+lenso-plugin-core.workspace = true
+lenso-notifications = { path = "../notifications" }
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+tempfile = "3"

@@ -8,13 +8,24 @@ description = "Scoped append-only audit services with explicit authority and rep
 [features]
 default = ["plugin"]
 plugin = ["dep:lenso-plugin-core"]
+sqlite = ["dep:rusqlite", "dep:serde", "dep:serde_json", "dep:tokio"]
 
 [dependencies]
 lenso-plugin-core = { workspace = true, optional = true }
 
+rusqlite = { version = "=0.38.0", features = ["bundled"], optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+
 [dev-dependencies]
+tempfile = "3"
 tokio.workspace = true
 
 [[example]]
 name = "audit-plugin"
 required-features = ["plugin"]
+
+[[example]]
+name = "permission-change"
+required-features = ["sqlite"]

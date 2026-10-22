@@ -5,12 +5,14 @@ pub type BoxError = Box<dyn Error + Send + Sync + 'static>;
 pub type ReportFuture<'a> = Pin<Box<dyn Future<Output = Result<(), BoxError>> + Send + 'a>>;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "sqlite", derive(serde::Serialize, serde::Deserialize))]
 pub struct AuditScope {
     pub tenant_id: Option<String>,
     pub scope_id: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "sqlite", derive(serde::Serialize, serde::Deserialize))]
 pub enum SubjectKind {
     User,
     Guest,
@@ -19,6 +21,7 @@ pub enum SubjectKind {
 
 /// Identity snapshot supplied by a trusted authority, never by event input.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "sqlite", derive(serde::Serialize, serde::Deserialize))]
 pub enum AuditActor {
     Subject {
         kind: SubjectKind,
@@ -31,6 +34,7 @@ pub enum AuditActor {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "sqlite", derive(serde::Serialize, serde::Deserialize))]
 pub enum AuditResult {
     Intent,
     Success,
@@ -60,6 +64,7 @@ impl From<OutcomeResult> for AuditResult {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "sqlite", derive(serde::Serialize, serde::Deserialize))]
 pub enum SummaryValue {
     Boolean(bool),
     Integer(i64),
@@ -77,18 +82,21 @@ pub type Summary = BTreeMap<String, SummaryValue>;
 pub type SummaryPolicy = BTreeMap<String, BTreeMap<String, SummaryRule>>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "sqlite", derive(serde::Serialize, serde::Deserialize))]
 pub struct AuditTarget {
     pub kind: String,
     pub id: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "sqlite", derive(serde::Serialize, serde::Deserialize))]
 pub enum RelationKind {
     Correction,
     Outcome,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "sqlite", derive(serde::Serialize, serde::Deserialize))]
 pub struct AuditRelation {
     pub kind: RelationKind,
     pub event_id: String,
@@ -97,6 +105,7 @@ pub struct AuditRelation {
 /// Times are nonnegative Unix milliseconds; IDs are canonical lowercase UUIDs.
 /// Empty summary is explicit, so arbitrary JSON cannot enter through this API.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "sqlite", derive(serde::Serialize, serde::Deserialize))]
 pub struct AuditInput {
     pub id: String,
     pub occurred_at: u64,
@@ -111,6 +120,7 @@ pub struct AuditInput {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "sqlite", derive(serde::Serialize, serde::Deserialize))]
 pub struct AuditEvent {
     pub input: AuditInput,
     pub recorded_at: u64,

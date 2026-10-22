@@ -1,0 +1,1 @@
+{"version":"checkout-v1","flags":{"express_checkout":{"default":false,"users":[{"identity":{"realm":"fixture","subject":"pilot"},"value":true}],"organizations":[],"rollout":{"basis_points":2500,"salt":"checkout-2026","cohort":"user"}}}}

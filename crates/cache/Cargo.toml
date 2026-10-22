@@ -12,4 +12,4 @@ serde_json.workspace = true
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["test-util"] }
+tokio = { workspace = true, features = ["test-util", "fs"] }
