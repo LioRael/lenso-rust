@@ -55,7 +55,7 @@ jobs:
           path: lenso
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.3
+          bun-version: 1.4.4
       - uses: dtolnay/rust-toolchain@stable
       - name: Build one Runtime candidate
         working-directory: lenso-runtime
