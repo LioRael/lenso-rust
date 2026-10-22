@@ -14,3 +14,7 @@ http-body = "1"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
+lenso-realtime = { path = "../realtime" }
+lenso-realtime-sse = { path = "../realtime-sse" }
+futures-util = "0.3"
+http-body-util = "0.1"
