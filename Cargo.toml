@@ -5,6 +5,7 @@ members = [
     "crates/log",
     "crates/cache",
     "crates/search",
+    "crates/webhook-receiver",
     "crates/authorization",
     "crates/audit",
     "crates/storage",

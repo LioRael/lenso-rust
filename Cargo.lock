@@ -946,6 +946,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "lenso-webhook-receiver"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "hmac",
+ "lenso-plugin-core",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.190"
 source = "registry+https://github.com/rust-lang/crates.io-index"
