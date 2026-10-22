@@ -4,6 +4,7 @@ members = [
     "crates/log-plugins",
     "crates/log",
     "crates/cache",
+    "crates/search",
     "crates/authorization",
     "crates/audit",
     "crates/storage",

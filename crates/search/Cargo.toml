@@ -1,0 +1,17 @@
+[package]
+name = "lenso-search"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Partitioned persistent SQLite FTS5 note search"
+
+[dependencies]
+lenso-plugin-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+rusqlite = { version = "=0.38.0", features = ["bundled"] }
+
+[dev-dependencies]
+tokio.workspace = true
+tempfile = "3"

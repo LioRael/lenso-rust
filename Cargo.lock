@@ -901,6 +901,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "lenso-search"
+version = "0.1.0"
+dependencies = [
+ "lenso-plugin-core",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "lenso-storage"
 version = "0.1.0"
 dependencies = [
