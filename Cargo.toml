@@ -11,6 +11,7 @@ members = [
     "crates/events",
     "crates/limits",
     "crates/tasks",
+    "crates/notifications",
     "crates/scheduler",
     "crates/mcp",
     "crates/plugin-runtime",
