@@ -1,0 +1,22 @@
+Cargo.lock
+  h_9d56aba080c170 399
+crates/mcp/Cargo.toml
+  h_9d56aba080c170 30
+crates/mcp/src/stdio.rs
+  h_9d56aba080c170 165-168
+crates/mcp/tests/authorization.rs
+  h_9d56aba080c170 1-159
+docs/MCP_ACCESS_INTEGRATION.md
+  h_9d56aba080c170 1-96
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "95ee5e2e2f41dc963735afa2f31e2fc34056c6c6",
+  "prompts": {},
+  "humans": {
+    "h_9d56aba080c170": {
+      "author": "LioRael <leo@lenso.dev>"
+    }
+  }
+}
