@@ -201,3 +201,27 @@ and restart, queue identity mismatch, and session cleanup. TLS checks require
 verified encryption, reject untrusted certificates and hostname mismatch, and
 exercise reconnect and shutdown through the public plugin API. Ordinary workspace
 tests compile these fixtures but do not start PostgreSQL.
+
+## Explicit owned worker
+
+For an owned polling lifetime, install `WorkerPlugin::new(tasks_handle,
+WorkerConfig { concurrency: 4, idle_wait: Duration::from_millis(250) })` as
+another `Instance` in the same App. It depends on that exact Tasks handle and
+reuses `run_one`'s admitted execution path. No worker starts unless installed.
+The concurrency limit (1–64) bounds this worker's simultaneous accepted runs;
+other workers and manual `run_one` callers have independent limits. Each empty
+claim waits for `idle_wait` (nonzero), so delayed jobs and other processes are
+observed by polling. No local queue or enqueue notification channel is added.
+
+Retain the worker handle before startup and obtain `Arc<Worker>` via `app.get`.
+`worker.stop()` synchronously closes its claim admission and wakes idle lanes.
+`worker.join().await` drains accepted runs, is repeatable and survives dropped
+waiters. Stop does not cancel handlers or producers; pending jobs remain durable.
+A provider/runtime error stops further worker admission, joins other lanes and
+is returned by join and Core cleanup; handler failures retain ordinary task retry
+semantics. Core shutdown stops worker admission in Entrances, stops all other entrances,
+then drains WorkGate. Resources cleanup joins the worker before closing Tasks. Await shutdown while Tokio is
+alive. A noncooperative handler can delay both join and shutdown indefinitely.
+
+Runnable public consumer (new local file only, no external services):
+`cargo run --locked -p lenso-tasks --example owned -- /tmp/my-owned-worker.sqlite`.

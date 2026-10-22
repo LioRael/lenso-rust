@@ -1,5 +1,7 @@
 //! Durable, at-least-once native tasks.
 #![doc = include_str!("../README.md")]
+mod owned_worker;
+pub use owned_worker::{Worker, WorkerConfig, WorkerPlugin};
 mod plugin;
 mod store;
 mod worker;
