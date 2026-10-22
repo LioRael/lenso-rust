@@ -301,3 +301,84 @@ async fn dropped_waiter_keeps_same_connection_transaction_admitted() {
         Err(TaskError::Closed)
     ));
 }
+
+#[tokio::test]
+async fn owned_worker_consumes_only_committed_business_submissions() {
+    use lenso_tasks::{WorkerConfig, WorkerPlugin};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("owned-transaction.sqlite");
+    provision(&path, "reports").await.unwrap();
+    let sql = rusqlite::Connection::open(&path).unwrap();
+    sql.execute_batch(reports::SCHEMA).unwrap();
+    sql.execute_batch("CREATE TRIGGER reject_mapping BEFORE UPDATE OF job_id ON report_request WHEN NEW.report_id = 'fail' BEGIN SELECT RAISE(ABORT, 'fixture'); END;").unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let handler_calls = calls.clone();
+    let task = Task::new(
+        "report",
+        RetryPolicy::default(),
+        move |v: ReportInput, _| {
+            let calls = handler_calls.clone();
+            async move {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Ok(json!({"id":v.report_id}))
+            }
+        },
+    );
+    let instance = Instance::new("tasks", TasksPlugin::new(&path, "reports", vec![task]));
+    let handle = instance.handle();
+    let worker = Instance::new(
+        "worker",
+        WorkerPlugin::new(
+            handle.clone(),
+            WorkerConfig {
+                concurrency: 2,
+                idle_wait: Duration::from_millis(5),
+            },
+        ),
+    );
+    let app = App::new()
+        .with(instance)
+        .with(worker)
+        .start()
+        .await
+        .unwrap();
+    let queue = app.get(&handle).unwrap();
+    let reports = Reports(queue.clone());
+    assert!(reports
+        .submit("a".into(), "fail".into(), "Title".into())
+        .await
+        .is_err());
+    assert!(queue.lookup("report:fail").await.unwrap().is_none());
+    let id = reports
+        .submit("a".into(), "ok".into(), "Title".into())
+        .await
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if queue.get(id).await.unwrap().unwrap().state == JobState::Succeeded {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    app.shutdown().await.unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        reports
+            .receipt("a".into(), "ok".into())
+            .await
+            .unwrap_err()
+            .to_string(),
+        TaskError::Closed.to_string()
+    );
+    assert_eq!(
+        sql.query_row("SELECT count(*) FROM report_request", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+}
