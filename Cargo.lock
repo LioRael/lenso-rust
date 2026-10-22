@@ -1194,6 +1194,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lenso-i18n"
+version = "0.1.0"
+dependencies = [
+ "lenso-notifications",
+ "lenso-plugin-core",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "lenso-limits"
 version = "0.1.0"
 dependencies = [

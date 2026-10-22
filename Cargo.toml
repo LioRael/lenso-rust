@@ -21,6 +21,7 @@ members = [
     "crates/usage-quota",
     "crates/tasks",
     "crates/notifications",
+    "crates/i18n",
     "crates/scheduler",
     "crates/mcp",
     "crates/plugin-runtime",
