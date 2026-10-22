@@ -8,6 +8,7 @@ members = [
     "crates/cache",
     "crates/search",
     "crates/webhook-receiver",
+    "crates/feature-flags",
     "crates/authorization",
     "crates/organization",
     "crates/audit",

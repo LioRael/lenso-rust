@@ -1183,6 +1183,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lenso-feature-flags"
+version = "0.1.0"
+dependencies = [
+ "lenso-plugin-core",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "lenso-limits"
 version = "0.1.0"
 dependencies = [
