@@ -1,0 +1,14 @@
+Cargo.lock
+  h_9d56aba080c170 888,890,901,903,912-915,917,933-936,938,954,956,959,985-986,1893,1991,1993,1995-1996,2001,2003,2005-2007,2029-2034,2618,3379,3389,3391
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a930b60d968c3a7582b9effdf8b8092381b3e65a",
+  "prompts": {},
+  "humans": {
+    "h_9d56aba080c170": {
+      "author": "LioRael <leo@lenso.dev>"
+    }
+  }
+}
