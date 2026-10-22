@@ -1,0 +1,18 @@
+[package]
+name = "lenso-usage-quota"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Durable idempotent usage and quota reservations in one SQLite domain"
+
+[dependencies]
+lenso-plugin-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+rusqlite = { version = "=0.38.0", features = ["bundled"] }
+
+[dev-dependencies]
+rusqlite = { version = "=0.38.0", features = ["hooks"] }
+tokio.workspace = true
+tempfile = "3"

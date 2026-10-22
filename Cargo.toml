@@ -17,6 +17,7 @@ members = [
     "crates/realtime",
     "crates/events",
     "crates/limits",
+    "crates/usage-quota",
     "crates/tasks",
     "crates/notifications",
     "crates/scheduler",
