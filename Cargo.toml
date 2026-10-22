@@ -9,6 +9,7 @@ members = [
     "crates/authorization",
     "crates/audit",
     "crates/storage",
+    "crates/media",
     "crates/realtime",
     "crates/events",
     "crates/limits",
