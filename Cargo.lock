@@ -900,6 +900,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "lenso-media"
+version = "0.1.0"
+dependencies = [
+ "fs2",
+ "image",
+ "lenso-plugin-core",
+ "lenso-storage",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "lenso-notifications"
 version = "0.1.0"
 dependencies = [
@@ -915,13 +932,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "lenso-media"
+name = "lenso-organization"
 version = "0.1.0"
 dependencies = [
- "fs2",
- "image",
+ "lenso-authorization",
  "lenso-plugin-core",
- "lenso-storage",
+ "rand",
  "rusqlite",
  "serde",
  "serde_json",
