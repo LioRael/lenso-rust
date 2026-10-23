@@ -61,6 +61,9 @@ assert!(cache.get("key").is_err());
 - `max_in_flight` bounds owned loader tasks, including fenced/cancelled tasks
   until Tokio finishes them. Busy errors do not queue. No generation tombstones
   or historical keys are retained. Batch reads preserve duplicates, max 100.
+  A batch prunes the family once but keeps ordered per-key reads, not an atomic
+  snapshot: later keys observe reentrant writes, expiry and family closure.
+  User deserialization runs outside the state lock.
 - Set/delete/invalidation fence old loaders; existing waiters may receive their
   result. Dropping one waiter cannot cancel another; dropping the last aborts its
   loader. Panic becomes `LoaderPanicked`; the process panic hook may still log

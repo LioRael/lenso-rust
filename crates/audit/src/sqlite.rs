@@ -1,5 +1,5 @@
 use crate::*;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, params_from_iter, types::Value, Connection, OptionalExtension};
 use std::{
     path::Path,
     sync::{Arc, Mutex},
@@ -95,10 +95,26 @@ impl AuditRepository for SqliteAuditRepository {
         let query = query.clone();
         self.run(move |connection| {
             let scope = serde_json::to_string(&query.scope)?;
-            let mut statement = connection.prepare(
-                "SELECT payload FROM lenso_audit_v1 WHERE scope=?1 ORDER BY recorded_at DESC,id DESC")?;
-            let mut rows = statement.query([scope])?;
+            let mut sql = String::from("SELECT payload FROM lenso_audit_v1 WHERE scope=?");
+            let mut parameters = vec![Value::Text(scope)];
+            if let Some(from) = query.recorded_from {
+                sql.push_str(" AND recorded_at>=?");
+                parameters.push(Value::Integer(i64::try_from(from)?));
+            }
+            if let Some(to) = query.recorded_to {
+                sql.push_str(" AND recorded_at<=?");
+                parameters.push(Value::Integer(i64::try_from(to)?));
+            }
+            if let Some(cursor) = &query.cursor {
+                sql.push_str(" AND (recorded_at,id)<(?,?)");
+                parameters.push(Value::Integer(i64::try_from(cursor.recorded_at)?));
+                parameters.push(Value::Text(cursor.id.clone()));
+            }
+            sql.push_str(" ORDER BY recorded_at DESC,id DESC");
+            let mut statement = connection.prepare(&sql)?;
+            let mut rows = statement.query(params_from_iter(parameters))?;
             let mut events = Vec::new();
+            // The page limit applies after residual payload filters, not before them.
             while events.len() < limit {
                 let Some(row) = rows.next()? else { break };
                 let payload: String = row.get(0)?;
