@@ -295,11 +295,15 @@ impl<V: Serialize + DeserializeOwned + Send + Sync + 'static> MemoryCache<V> {
             key: key.into(),
         })
     }
-    fn state(&self) -> Result<std::sync::MutexGuard<'_, State>, CacheError> {
-        let mut state = self.inner.state.lock().map_err(|_| CacheError::Internal)?;
+    fn lock_state(&self) -> Result<std::sync::MutexGuard<'_, State>, CacheError> {
+        let state = self.inner.state.lock().map_err(|_| CacheError::Internal)?;
         if state.closed {
             return Err(CacheError::Closed);
         }
+        Ok(state)
+    }
+    fn state(&self) -> Result<std::sync::MutexGuard<'_, State>, CacheError> {
+        let mut state = self.lock_state()?;
         state.prune();
         Ok(state)
     }
@@ -334,12 +338,30 @@ impl<V: Serialize + DeserializeOwned + Send + Sync + 'static> MemoryCache<V> {
             .transpose()
     }
     /// Ordered per-key reads, duplicates preserved, at most 100 keys.
+    /// Prunes the family once, without snapshotting later keys or their expiry.
     pub fn get_many(&self, keys: &[&str]) -> Result<Vec<Option<V>>, CacheError> {
         if keys.len() > 100 {
             return Err(CacheError::InvalidInput);
         }
         drop(self.state()?);
-        keys.iter().map(|key| self.get(key)).collect()
+        keys.iter()
+            .map(|key| {
+                let address = self.address(key)?;
+                // Deserialization can reenter, mutate or close the family. Recheck
+                // each key under its own lock, but do not repeat global housekeeping.
+                let bytes = self
+                    .lock_state()?
+                    .entries
+                    .get(&address)
+                    .filter(|entry| entry.expires > Instant::now())
+                    .map(|entry| entry.bytes.clone());
+                bytes
+                    .map(|bytes| {
+                        serde_json::from_slice(&bytes).map_err(|_| CacheError::Serialization)
+                    })
+                    .transpose()
+            })
+            .collect()
     }
     /// Stores a serialized copy; zero TTL deletes and fences pending writeback.
     pub fn set(
