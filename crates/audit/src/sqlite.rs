@@ -119,9 +119,12 @@ impl AuditRepository for SqliteAuditRepository {
                 let Some(row) = rows.next()? else { break };
                 let payload: String = row.get(0)?;
                 let event: AuditEvent = serde_json::from_str(&payload)?;
-                if crate::validation::matches_query(&event, &query) { events.push(event); }
+                if crate::validation::matches_query(&event, &query) {
+                    events.push(event);
+                }
             }
             Ok(events)
-        }).await
+        })
+        .await
     }
 }
