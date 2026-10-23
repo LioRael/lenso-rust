@@ -195,11 +195,12 @@ inserts; update/delete triggers reject accidental mutation. These triggers are
 not tamper evidence against a database owner. Existing databases are trusted
 host resources; this adapter does not repair incompatible schemas.
 
-Scope selection and descending ordering use a database index. Additional filters
-and exclusive cursors reuse the existing native predicate while streaming rows;
-memory is bounded by the requested page, but a selective query can scan the
-entire scope. No global list is exposed. Payload serialization is an internal
-v1 storage format, not a promised TS wire representation.
+Scope selection, inclusive time bounds and the exclusive `(recorded_at, id)`
+cursor use indexed columns before payload decoding. Remaining filters reuse the
+native predicate while streaming rows; the page limit applies after those filters.
+Memory is bounded by the requested page, but a selective residual filter can still
+scan the selected range. No global list is exposed. Payload serialization is an
+internal v1 storage format, not a promised TS wire representation.
 
 Commits use `synchronous=FULL`. Reopening a file recovers committed audit rows.
 This alone does not verify filesystem/power-loss durability, so `durable_intents`
