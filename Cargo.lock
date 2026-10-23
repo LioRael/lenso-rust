@@ -437,6 +437,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e9c71c2167ca323c882b99918929403426e2373ea17242ff5653e0d5e1058be"
 
 [[package]]
+name = "email-encoding"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "420b9da095f052ea597503e39073b5b3c522f7db933fbac202d91d24492693fd"
+dependencies = [
+ "base64 0.23.1",
+ "memchr",
+]
+
+[[package]]
+name = "email_address"
+version = "0.2.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e079f19b08ca6239f47f8ba8509c11cf3ea30095831f7fed61441475edd8c449"
+
+[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1086,6 +1102,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "lenso-configuration"
+version = "0.1.0"
+dependencies = [
+ "lenso-plugin-core",
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "lenso-data-import"
+version = "0.1.0"
+dependencies = [
+ "lenso-plugin-core",
+ "lenso-storage",
+ "lenso-tasks",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "lenso-events"
 version = "0.1.0"
 dependencies = [
@@ -1195,6 +1240,17 @@ dependencies = [
  "thiserror",
  "tokio",
  "ureq",
+]
+
+[[package]]
+name = "lenso-notifications-smtp"
+version = "0.1.0"
+dependencies = [
+ "lenso-notifications",
+ "lettre",
+ "serde_json",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -1379,6 +1435,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "lenso-webhook-delivery"
+version = "0.1.0"
+dependencies = [
+ "hmac",
+ "lenso-plugin-core",
+ "lenso-tasks",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "ureq",
+ "url",
+]
+
+[[package]]
 name = "lenso-webhook-receiver"
 version = "0.1.0"
 dependencies = [
@@ -1392,6 +1466,46 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "lenso-workflow"
+version = "0.1.0"
+dependencies = [
+ "lenso-plugin-core",
+ "lenso-tasks",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "lettre"
+version = "0.11.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2c646bd5cc763b1087b15493e29a64be6147ba8f19342004fa52048ee596eae"
+dependencies = [
+ "async-trait",
+ "base64 0.23.1",
+ "email-encoding",
+ "email_address",
+ "fastrand",
+ "futures-io",
+ "futures-util",
+ "httpdate",
+ "idna",
+ "mime",
+ "nom",
+ "percent-encoding",
+ "quoted_printable",
+ "rustls",
+ "socket2",
+ "tokio",
+ "tokio-rustls",
+ "url",
+ "webpki-roots 1.0.9",
 ]
 
 [[package]]
@@ -1547,6 +1661,15 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "tempfile",
+]
+
+[[package]]
+name = "nom"
+version = "8.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df9761775871bdef83bee530e60050f7e54b1105350d6884eb0fb4f46c2f9405"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]
@@ -1977,6 +2100,12 @@ checksum = "1fbf4db142a473a8d80c26bbf18454ed458bf8d26c8219c331daecfdbd079001"
 dependencies = [
  "proc-macro2",
 ]
+
+[[package]]
+name = "quoted_printable"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "478e0585659a122aa407eb7e3c0e1fa51b1d8a870038bd29f0cf4a8551eea972"
 
 [[package]]
 name = "r-efi"
@@ -2689,6 +2818,16 @@ dependencies = [
  "tokio",
  "tokio-util",
  "whoami",
+]
+
+[[package]]
+name = "tokio-rustls"
+version = "0.26.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9cc2678c2cdd569ef8215e2afd7954ada2ae20b4fdd2c5fe6139a3b02d105db"
+dependencies = [
+ "rustls",
+ "tokio",
 ]
 
 [[package]]
