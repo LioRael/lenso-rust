@@ -1,0 +1,18 @@
+Cargo.lock
+  h_9d56aba080c170 1369,1371,1373-1374
+crates/web-axum/Cargo.toml
+  h_9d56aba080c170 17-20
+crates/web-axum/tests/sse_composition.rs
+  h_9d56aba080c170 1-199
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4043ee2a1c51029873b19062e76f0a19b0d19c16",
+  "prompts": {},
+  "humans": {
+    "h_9d56aba080c170": {
+      "author": "LioRael <leo@lenso.dev>"
+    }
+  }
+}

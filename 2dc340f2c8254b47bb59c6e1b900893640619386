@@ -1,0 +1,14 @@
+.github/workflows/check.yml
+  h_9d56aba080c170 30-37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2dc340f2c8254b47bb59c6e1b900893640619386",
+  "prompts": {},
+  "humans": {
+    "h_9d56aba080c170": {
+      "author": "LioRael <leo@lenso.dev>"
+    }
+  }
+}
