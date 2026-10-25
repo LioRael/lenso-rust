@@ -138,6 +138,8 @@ pub struct Configuration<T> {
     gate: WorkGate,
 }
 impl<T: DeserializeOwned + Send + Sync + 'static> Configuration<T> {
+    /// # Errors
+    /// Returns `Closed` after admission is sealed or `Worker` for a poisoned state mutex.
     pub fn request(&self) -> Result<RequestConfig<T>, Error> {
         let work = self.gate.enter().map_err(|_| Error::Closed)?;
         let state = self.state.lock().map_err(|_| Error::Worker)?;
@@ -152,6 +154,10 @@ impl<T: DeserializeOwned + Send + Sync + 'static> Configuration<T> {
     /// Compare-and-swap against the caller's observed version. Concurrent reloads
     /// from that version have at most one winner. Cancellation of this waiter does
     /// not cancel accepted work; obtain a fresh request to learn the current version.
+    ///
+    /// # Errors
+    /// Returns revision conflict, file/JSON/Core configuration, business validation,
+    /// lifecycle or worker errors. Failed validation never replaces the old snapshot.
     pub async fn reload(self: &Arc<Self>, expected: u64) -> Result<u64, Error> {
         let work = self.gate.enter().map_err(|_| Error::Closed)?;
         let service = self.clone();

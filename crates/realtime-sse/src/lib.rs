@@ -23,6 +23,8 @@ pub enum Error {
 
 /// Fixed event names and compact JSON prevent data from injecting SSE fields.
 /// Subscription identifiers are local capabilities, never SSE replay IDs.
+/// # Errors
+/// Returns an encoding error if the envelope cannot be serialized as JSON.
 pub fn encode(envelope: &Envelope) -> Result<Bytes, Error> {
     let name = match envelope.event {
         Event::Ready { .. } => "ready",
@@ -47,6 +49,9 @@ pub struct Sse<P> {
 impl<P: Send + Sync + 'static> Sse<P> {
     /// Reject any nonempty Last-Event-ID before sending HTTP success headers.
     /// Failure drops the supplied connection. No replay ID or retry is emitted.
+    /// # Errors
+    /// Returns an error for a heartbeat outside the supported range or a nonempty
+    /// resume cursor; this transport has no replay history.
     pub fn new(
         connection: Connection<P>,
         heartbeat: Duration,
@@ -97,6 +102,8 @@ impl<P: Send + Sync + 'static> Sse<P> {
     /// Write raw SSE body bytes to an already established transport. Each write
     /// completes before reading again. HTTP framing/headers belong to the host.
     /// Error or cancellation drops this owned adapter immediately.
+    /// # Errors
+    /// Returns frame-encoding or writer I/O errors, dropping the owned connection.
     pub async fn write_to<W: AsyncWrite + Unpin>(mut self, writer: &mut W) -> std::io::Result<()> {
         while let Some(frame) = self.next_frame().await {
             let frame = frame.map_err(std::io::Error::other)?;

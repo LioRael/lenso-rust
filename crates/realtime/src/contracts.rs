@@ -11,6 +11,10 @@ pub struct Resource {
     id: String,
 }
 impl Resource {
+    /// Construct an exact resource topic from bounded UTF-8 identifiers.
+    ///
+    /// # Errors
+    /// Returns [`RealtimeError::InvalidInput`] for invalid resource parts.
     pub fn new(
         scope: impl Into<String>,
         kind: impl Into<String>,
@@ -201,6 +205,10 @@ impl Default for RealtimeConfig {
     }
 }
 impl RealtimeConfig {
+    /// Validate capacity, buffering and authorization time limits.
+    ///
+    /// # Errors
+    /// Returns [`RealtimeError::InvalidInput`] for zero, excessive or inconsistent limits.
     pub fn validate(&self) -> Result<(), RealtimeError> {
         let limits = [
             self.max_connections,

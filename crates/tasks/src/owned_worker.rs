@@ -42,6 +42,8 @@ impl Worker {
     pub fn stop(&self) {
         self.control.stop();
     }
+    /// # Errors
+    /// Returns the worker's shared terminal failure; joining does not restart it.
     pub async fn join(&self) -> Result<(), Arc<TaskError>> {
         let mut done = self.done.clone();
         loop {

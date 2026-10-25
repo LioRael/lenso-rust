@@ -25,6 +25,10 @@ pub struct SqliteTaskTransaction<'a> {
 }
 impl SqliteTaskTransaction<'_> {
     /// Single parameterized business statement; transaction control is denied.
+    ///
+    /// # Errors
+    /// Returns SQL errors or `TransactionAborted` after an earlier failure.
+    /// Any statement error prevents the outer transaction from committing.
     pub fn execute(&mut self, sql: &str, params: impl Params) -> Result<usize, TaskError> {
         if self.failed {
             return Err(TaskError::TransactionAborted);
@@ -35,6 +39,9 @@ impl SqliteTaskTransaction<'_> {
             .map_err(TaskError::from);
         self.record(result)
     }
+    /// # Errors
+    /// Returns SQL, missing-row or mapping errors, or `TransactionAborted` after
+    /// an earlier failure. A query error also prevents outer commit.
     pub fn query_row<T>(
         &mut self,
         sql: &str,
@@ -51,6 +58,10 @@ impl SqliteTaskTransaction<'_> {
         self.record(result)
     }
     /// Staged ID, confirmed only when the outer sqlite_transaction returns Ok.
+    ///
+    /// # Errors
+    /// Returns validation, unknown-task, deduplication or SQL errors. Any failure
+    /// marks the entire transaction aborted, even if the caller catches it.
     pub fn enqueue(
         &mut self,
         task: &str,
@@ -82,6 +93,11 @@ impl Tasks {
     /// One synchronous callback on the blocking pool, using this provider's one
     /// startup-owned connection. No nested/foreign transaction or automatic replay.
     /// Do not call back into Tasks or perform external effects from the callback.
+    ///
+    /// # Errors
+    /// Returns admission/provider errors, `SqliteRequired` for other backends,
+    /// callback failures, or rollback/commit failures. `CommitUnconfirmed` requires
+    /// reconciliation; do not automatically repeat external business effects.
     pub async fn sqlite_transaction<R, F>(&self, operation: F) -> Result<R, TaskError>
     where
         R: Send + 'static,

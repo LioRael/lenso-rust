@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 description = "Durable SQLite tasks with fenced recovery and native Lenso lifecycle"
 
+[lints]
+workspace = true
+
 [dependencies]
 lenso-plugin-core.workspace = true
 tokio.workspace = true

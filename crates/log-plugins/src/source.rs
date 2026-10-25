@@ -12,6 +12,9 @@ use std::{
 pub trait LogSource {
     type Error: Error + Send + Sync + 'static;
 
+    /// # Errors
+    /// Implementations report source access or decoding failures through their
+    /// associated error type; callers must not treat failure as an empty source.
     fn read_logs(&self) -> Result<Vec<LogRecord>, Self::Error>;
 }
 

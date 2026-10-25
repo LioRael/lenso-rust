@@ -9,6 +9,10 @@ impl Tasks {
     /// Claim and await at most one due task. Host owns invocation/concurrency.
     /// The owned runner survives cancellation of its waiting caller. Shutdown
     /// drains it before releasing SQLite. A noncooperative handler can delay drain.
+    ///
+    /// # Errors
+    /// Returns admission, provider, runtime or lost-claim errors. Handler failures
+    /// are persisted in job status. An error is not proof that no business effect occurred.
     pub async fn run_one(self: &Arc<Self>) -> Result<Option<JobStatus>, TaskError> {
         self.spawn_one()?.await.map_err(|_| TaskError::Runtime)?
     }

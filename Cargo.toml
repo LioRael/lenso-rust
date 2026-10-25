@@ -50,3 +50,7 @@ lenso-log = { path = "crates/log" }
 lenso-cache = { path = "crates/cache" }
 lenso-plugin-runtime = { path = "crates/plugin-runtime" }
 runtime-sdk = { git = "https://github.com/LioRael/lenso-runtime", rev = "dd0eb084e490e5e4bda05ce0dbb503f3aae50590" }
+
+[workspace.lints.clippy]
+missing_errors_doc = "warn"
+return_self_not_must_use = "warn"

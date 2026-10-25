@@ -194,6 +194,23 @@ pub enum ToolError {
     Busy,
     Closed,
 }
+impl std::fmt::Display for ToolError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::InvalidInput => "invalid tool input",
+            Self::InputTooLarge => "tool input exceeds limit",
+            Self::OutputTooLarge => "tool output exceeds limit",
+            Self::Forbidden => "tool access denied",
+            Self::Failed => "tool execution failed",
+            Self::Cancelled => "tool request cancelled",
+            Self::Timeout => "tool request timed out",
+            Self::Busy => "tool adapter busy",
+            Self::Closed => "tool adapter closed",
+        })
+    }
+}
+impl std::error::Error for ToolError {}
+
 impl ToolError {
     fn diagnostic(self) -> Value {
         let (code, phase, message) = match self {
@@ -336,6 +353,11 @@ impl<I> Drop for Admission<I> {
     }
 }
 impl<I: Send + Sync + 'static> McpAdapter<I> {
+    /// Construct an adapter over a validated catalog and the host's admission gate.
+    ///
+    /// # Errors
+    /// Returns [`ProtocolError::Configuration`] for invalid limits, duplicate tool
+    /// names, non-object input schemas, or a catalog exceeding its byte budget.
     pub fn new(
         config: McpConfig,
         operations: Vec<Operation<I>>,
@@ -433,6 +455,12 @@ impl<I: Send + Sync + 'static> McpAdapter<I> {
         });
         wait.await.unwrap_or(Err(ToolError::Failed))
     }
+    /// Invoke one visible, authorized tool while retaining admission until it settles.
+    ///
+    /// # Errors
+    /// Returns [`ProtocolError::InvalidParams`] for an unknown tool name.
+    /// Input, policy, execution and lifecycle failures are encoded in the returned
+    /// [`CallToolResult`], not raised as protocol errors.
     pub async fn call_tool(
         &self,
         name: &str,
@@ -473,6 +501,11 @@ impl<I: Send + Sync + 'static> McpAdapter<I> {
             Err(error) => CallToolResult::failure(error),
         })
     }
+    /// Discover a page of tools using fresh visibility checks for the supplied identity.
+    ///
+    /// # Errors
+    /// Returns [`ProtocolError`] for closed or busy admission, failed or cancelled
+    /// discovery, invalid/stale cursors, or pages exceeding the catalog budget.
     pub async fn list_tools(
         &self,
         context: RequestContext<I>,
@@ -510,6 +543,10 @@ impl<I: Send + Sync + 'static> McpAdapter<I> {
     }
     /// Trusted host lifecycle operation. Validate before atomically replacing the
     /// catalog; admitted calls keep their original handler and work guard.
+    ///
+    /// # Errors
+    /// Returns [`ProtocolError::Configuration`] for an invalid catalog or exhausted
+    /// catalog revision, or [`ProtocolError::Closed`] after admission is sealed.
     pub fn replace_operations(&self, operations: Vec<Operation<I>>) -> Result<(), ProtocolError> {
         validate_catalog(&self.0.config, &operations)?;
         let mut state = self.0.state.lock().unwrap();
@@ -520,8 +557,11 @@ impl<I: Send + Sync + 'static> McpAdapter<I> {
             .catalog_version
             .checked_add(1)
             .ok_or(ProtocolError::Configuration)?;
-        state.operations = Arc::new(operations);
-        state.cursors.clear();
+        let retired_operations = std::mem::replace(&mut state.operations, Arc::new(operations));
+        let retired_cursors = std::mem::take(&mut state.cursors);
+        drop(state);
+        drop(retired_operations);
+        drop(retired_cursors);
         Ok(())
     }
     /// Seal admission and signal all work; registered entrance cleanup uses this
@@ -529,8 +569,10 @@ impl<I: Send + Sync + 'static> McpAdapter<I> {
     pub fn stop(&self) {
         let mut state = self.0.state.lock().unwrap();
         state.closed = true;
-        state.cursors.clear();
+        let retired = std::mem::take(&mut state.cursors);
+        drop(state);
         self.0.stop.cancel();
+        drop(retired);
     }
     pub async fn close(&self) {
         self.stop();
@@ -577,6 +619,9 @@ fn make_page<I>(
 ) -> Result<ToolPage, ProtocolError> {
     let now = Instant::now();
     let names: Vec<_> = visible.iter().map(|t| t.name.clone()).collect();
+    // Declared before the guard so host identity destructors run after unlock,
+    // including when cursor validation returns early.
+    let mut retired = Vec::new();
     let mut state = inner.state.lock().unwrap();
     if state.closed {
         return Err(ProtocolError::Closed);
@@ -584,7 +629,15 @@ fn make_page<I>(
     if state.catalog_version != version {
         return Err(ProtocolError::InvalidParams);
     }
-    state.cursors.retain(|_, c| c.expires > now);
+    let expired: Vec<_> = state
+        .cursors
+        .iter()
+        .filter(|(_, c)| c.expires <= now)
+        .map(|(key, _)| key.clone())
+        .collect();
+    for key in expired {
+        retired.extend(state.cursors.remove(&key));
+    }
     let old = cursor
         .as_ref()
         .map(|key| state.cursors.get(key).ok_or(ProtocolError::InvalidParams))
@@ -626,7 +679,7 @@ fn make_page<I>(
         return Err(ProtocolError::Discovery);
     }
     if let Some(cursor) = cursor {
-        state.cursors.remove(&cursor);
+        retired.extend(state.cursors.remove(&cursor));
     }
     if let Some(key) = next {
         state.cursors.insert(

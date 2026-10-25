@@ -63,6 +63,8 @@ pub struct Events {
     state: Arc<Mutex<State>>,
 }
 impl Events {
+    /// # Errors
+    /// Returns `Invalid` for zero capacities or an excessive subscriber queue size.
     pub fn new(config: EventConfig) -> Result<Self, EventError> {
         config.validate()?;
         Ok(Self {
@@ -74,6 +76,8 @@ impl Events {
             })),
         })
     }
+    /// # Errors
+    /// Returns `Closed` after shutdown or `Full` for subscriber/ID exhaustion.
     pub fn subscribe(&self) -> Result<Subscription, EventError> {
         let mut state = self.state.lock().unwrap();
         if state.closed {
@@ -94,6 +98,10 @@ impl Events {
     }
     /// Atomic fan-out: if any live subscriber is full, none receives the event.
     /// Zero subscribers returns zero; there is no retained event history.
+    ///
+    /// # Errors
+    /// Returns `Invalid` for oversized payloads, `Closed` after shutdown, or `Full`
+    /// when a subscriber cannot reserve capacity. No subscriber receives a failed fan-out.
     pub fn publish(&self, event: impl Into<Arc<[u8]>>) -> Result<usize, EventError> {
         let event = event.into();
         if event.len() > self.config.max_event_bytes {

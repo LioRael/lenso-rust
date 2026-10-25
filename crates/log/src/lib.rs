@@ -4,18 +4,16 @@
 use lenso_plugin_core::{BoxError, CleanupPhase, Plugin, Setup};
 use serde_json::{json, Map, Value};
 use std::{
+    cell::Cell,
     error::Error,
     fmt,
     future::Future,
     panic::{catch_unwind, AssertUnwindSafe},
     pin::Pin,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
-    },
+    sync::{Arc, Mutex},
     time::Duration,
 };
-use tokio::sync::watch;
+use tokio::sync::{watch, Notify};
 use tracing::{instrument::WithSubscriber, Dispatch, Instrument, Span};
 
 /// Structured public fields. Messages and all non-sensitive values must be public.
@@ -117,6 +115,10 @@ pub struct TraceContext {
 }
 impl TraceContext {
     /// Validate standard 32/16-character hexadecimal trace/span identifiers.
+    ///
+    /// # Errors
+    /// Returns [`LogError::InvalidTraceContext`] for wrong lengths, non-hexadecimal
+    /// characters, or all-zero identifiers.
     pub fn new(trace_id: impl Into<String>, span_id: impl Into<String>) -> Result<Self, LogError> {
         let trace_id = trace_id.into();
         let span_id = span_id.into();
@@ -141,11 +143,52 @@ type Flush = Box<dyn FnOnce() -> FlushFuture + Send>;
 struct Inner {
     dispatch: Dispatch,
     options: LoggerOptions,
-    closed: AtomicBool,
-    // Serializes close against synchronous writes so flushing cannot overtake them.
-    writes: Mutex<()>,
-    flush: Mutex<Option<(Flush, Duration)>>,
+    writes: Mutex<Writes>,
+    drained: Notify,
     completion: watch::Sender<Option<Result<(), LogError>>>,
+}
+
+struct Writes {
+    closed: bool,
+    active: usize,
+    flush: Option<(Flush, Duration)>,
+}
+
+struct WritePermit(Arc<Inner>);
+impl Drop for WritePermit {
+    fn drop(&mut self) {
+        let drained = {
+            let mut writes = self.0.writes.lock().expect("logger admission poisoned");
+            writes.active -= 1;
+            writes.closed && writes.active == 0
+        };
+        if drained {
+            // Only the owned close task waits; retain a permit if it has not polled yet.
+            self.0.drained.notify_one();
+        }
+    }
+}
+
+thread_local! {
+    static DISPATCHING: Cell<bool> = const { Cell::new(false) };
+}
+
+struct DispatchScope;
+impl DispatchScope {
+    fn enter() -> Option<Self> {
+        DISPATCHING.with(|active| {
+            if active.replace(true) {
+                None
+            } else {
+                Some(Self)
+            }
+        })
+    }
+}
+impl Drop for DispatchScope {
+    fn drop(&mut self) {
+        DISPATCHING.with(|active| active.set(false));
+    }
 }
 
 struct Scope {
@@ -236,9 +279,12 @@ impl Logger {
             inner: Arc::new(Inner {
                 dispatch,
                 options,
-                closed: AtomicBool::new(false),
-                writes: Mutex::new(()),
-                flush: Mutex::new(flush),
+                writes: Mutex::new(Writes {
+                    closed: false,
+                    active: 0,
+                    flush,
+                }),
+                drained: Notify::new(),
                 completion,
             }),
             plugin_id: Arc::from(plugin_id.into()),
@@ -248,6 +294,7 @@ impl Logger {
     }
 
     /// Add recursively sanitized bindings without changing identity or ownership.
+    #[must_use]
     pub fn child(&self, fields: Fields) -> Self {
         let mut child = self.clone();
         child.fields.extend(sanitize_fields(fields));
@@ -285,31 +332,52 @@ impl Logger {
     /// Emit public fields at a severity. Reserved metadata cannot be overridden.
     /// Logging does not re-enter the app work gate: admitted work and cleanup can
     /// continue to log until Resource-phase close.
+    ///
+    /// # Errors
+    /// Returns [`LogError::Closed`] after local write admission is sealed.
     pub fn log(&self, level: Level, message: &str, fields: Fields) -> Result<(), LogError> {
         self.emit(level, message, sanitize_fields(fields))
     }
 
     /// Emit trace-level object fields.
+    ///
+    /// # Errors
+    /// Returns [`LogError::InvalidFields`] for non-object fields or [`LogError::Closed`].
     pub fn trace(&self, fields: Value, message: &str) -> Result<(), LogError> {
         self.log_value(Level::Trace, fields, message)
     }
     /// Emit debug-level object fields.
+    ///
+    /// # Errors
+    /// Returns [`LogError::InvalidFields`] for non-object fields or [`LogError::Closed`].
     pub fn debug(&self, fields: Value, message: &str) -> Result<(), LogError> {
         self.log_value(Level::Debug, fields, message)
     }
     /// Emit info-level object fields.
+    ///
+    /// # Errors
+    /// Returns [`LogError::InvalidFields`] for non-object fields or [`LogError::Closed`].
     pub fn info(&self, fields: Value, message: &str) -> Result<(), LogError> {
         self.log_value(Level::Info, fields, message)
     }
     /// Emit warning-level object fields.
+    ///
+    /// # Errors
+    /// Returns [`LogError::InvalidFields`] for non-object fields or [`LogError::Closed`].
     pub fn warn(&self, fields: Value, message: &str) -> Result<(), LogError> {
         self.log_value(Level::Warn, fields, message)
     }
     /// Emit error-level object fields. Use `log_error` for native errors.
+    ///
+    /// # Errors
+    /// Returns [`LogError::InvalidFields`] for non-object fields or [`LogError::Closed`].
     pub fn error(&self, fields: Value, message: &str) -> Result<(), LogError> {
         self.log_value(Level::Error, fields, message)
     }
     /// Emit fatal-level object fields.
+    ///
+    /// # Errors
+    /// Returns [`LogError::InvalidFields`] for non-object fields or [`LogError::Closed`].
     pub fn fatal(&self, fields: Value, message: &str) -> Result<(), LogError> {
         self.log_value(Level::Fatal, fields, message)
     }
@@ -322,6 +390,10 @@ impl Logger {
 
     /// Emit an opaque error plus only classifier-approved code/phase.
     /// No Display, Debug, source, stack or arbitrary error properties are read.
+    ///
+    /// # Errors
+    /// Returns [`LogError::Closed`] after write admission is sealed. Classifier
+    /// panics omit classification rather than failing the log operation.
     pub fn log_error(
         &self,
         message: &str,
@@ -348,13 +420,22 @@ impl Logger {
     }
 
     fn emit(&self, level: Level, message: &str, fields: Fields) -> Result<(), LogError> {
-        let _write = self.inner.writes.lock().unwrap_or_else(|p| p.into_inner());
-        if self.inner.closed.load(Ordering::Acquire) {
-            return Err(LogError::Closed);
-        }
+        let _write = {
+            let mut writes = self.inner.writes.lock().expect("logger admission poisoned");
+            if writes.closed {
+                return Err(LogError::Closed);
+            }
+            writes.active += 1;
+            WritePermit(self.inner.clone())
+        };
         if level < self.inner.options.minimum_level {
             return Ok(());
         }
+        // Tracing cannot replace its thread-local Dispatch from inside a subscriber.
+        // Suppress recursive sink logging, including through another Logger.
+        let Some(_dispatch) = DispatchScope::enter() else {
+            return Ok(());
+        };
         let mut record = self.fields.clone();
         record.extend(fields);
         // These identifiers describe the actual scope, not caller-supplied bindings.
@@ -401,21 +482,34 @@ impl Logger {
     /// Concurrent closes share the same result. Cancellation of a close waiter
     /// does not cancel flushing. Borrowed Dispatch is never flushed or shut down.
     /// Async close requires a Tokio runtime.
+    ///
+    /// # Errors
+    /// Returns [`LogError::FlushFailed`], [`LogError::FlushPanicked`], or
+    /// [`LogError::FlushTimeout`] for the owned flush callback. The logger remains
+    /// closed and later close calls return the same result without retrying.
     pub async fn close(&self) -> Result<(), LogError> {
         {
-            let _write = self.inner.writes.lock().unwrap_or_else(|p| p.into_inner());
-            if !self.inner.closed.swap(true, Ordering::AcqRel) {
-                let flush = self
-                    .inner
-                    .flush
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .take();
-                if let Some((flush, timeout)) = flush {
-                    let completion = self.inner.completion.clone();
-                    tokio::spawn(async move {
+            let mut writes = self.inner.writes.lock().expect("logger admission poisoned");
+            if !writes.closed {
+                writes.closed = true;
+                let flush = writes.flush.take();
+                let inner = self.inner.clone();
+                tokio::spawn(async move {
+                    loop {
+                        if inner
+                            .writes
+                            .lock()
+                            .expect("logger admission poisoned")
+                            .active
+                            == 0
+                        {
+                            break;
+                        }
+                        inner.drained.notified().await;
+                    }
+                    let result = if let Some((flush, timeout)) = flush {
                         let mut task = tokio::spawn(async move { flush().await });
-                        let result = match tokio::time::timeout(timeout, &mut task).await {
+                        match tokio::time::timeout(timeout, &mut task).await {
                             Ok(Ok(Ok(()))) => Ok(()),
                             Ok(Ok(Err(_))) => Err(LogError::FlushFailed),
                             Ok(Err(_)) => Err(LogError::FlushPanicked),
@@ -423,12 +517,12 @@ impl Logger {
                                 task.abort();
                                 Err(LogError::FlushTimeout)
                             }
-                        };
-                        completion.send_replace(Some(result));
-                    });
-                } else {
-                    self.inner.completion.send_replace(Some(Ok(())));
-                }
+                        }
+                    } else {
+                        Ok(())
+                    };
+                    inner.completion.send_replace(Some(result));
+                });
             }
         }
         let mut completion = self.inner.completion.subscribe();

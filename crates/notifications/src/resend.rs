@@ -16,6 +16,8 @@ pub struct Resend {
 impl Resend {
     /// Host supplies a trusted pre-resolved IP at startup; TLS validates api.resend.com.
     /// This avoids unbounded platform DNS during delivery.
+    /// # Errors
+    /// Returns `Invalid` for invalid account, credential or sender configuration.
     pub fn new(
         account: &str,
         token: String,
@@ -32,6 +34,8 @@ impl Resend {
         )
     }
     /// Local fixture only: fixed loopback IP and dummy credentials.
+    /// # Errors
+    /// Returns `Invalid` for an invalid fixture endpoint or timeout.
     pub fn local_fixture(port: u16, timeout: Duration) -> Result<Self, Error> {
         Self::build(
             format!("http://127.0.0.1:{port}/emails"),

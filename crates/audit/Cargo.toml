@@ -10,6 +10,9 @@ default = ["plugin"]
 plugin = ["dep:lenso-plugin-core"]
 sqlite = ["dep:rusqlite", "dep:serde", "dep:serde_json", "dep:tokio"]
 
+[lints]
+workspace = true
+
 [dependencies]
 lenso-plugin-core = { workspace = true, optional = true }
 

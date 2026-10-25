@@ -64,6 +64,8 @@ fn identifier(s: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 impl Config {
+    /// # Errors
+    /// Returns `Config` for invalid receiver/source/type/key configuration or body limits.
     pub fn validate(&self) -> Result<(), Error> {
         if !bounded(&self.receiver_id, 256)
             || !bounded(&self.source, 256)
@@ -115,6 +117,9 @@ pub struct BusinessTransaction<'a> {
     failed: std::cell::Cell<bool>,
 }
 impl BusinessTransaction<'_> {
+    /// # Errors
+    /// Returns `Apply` for forbidden/failed SQL or an already-aborted transaction.
+    /// A swallowed statement error still prevents inbox and business commit.
     pub fn execute<P: Params>(&self, sql: &str, params: P) -> Result<usize, Error> {
         if self.failed.get() || self.connection.is_autocommit() {
             self.failed.set(true);
@@ -146,6 +151,9 @@ fn business_auth(ctx: AuthContext<'_>) -> Authorization {
     }
 }
 /// Explicit migration; the host separately provisions business tables in this database.
+///
+/// # Errors
+/// Returns `Unavailable` if opening or provisioning the inbox database fails.
 pub fn provision(path: impl AsRef<Path>) -> Result<(), Error> {
     let c = Connection::open(path).map_err(|_| Error::Unavailable)?;
     c.execute_batch("CREATE TABLE IF NOT EXISTS lenso_webhook_inbox(receiver_id TEXT NOT NULL,event_id TEXT NOT NULL,body_digest BLOB NOT NULL,received_at INTEGER NOT NULL,PRIMARY KEY(receiver_id,event_id));").map_err(|_|Error::Unavailable)
@@ -156,6 +164,8 @@ pub struct Receiver {
     gate: WorkGate,
 }
 impl Receiver {
+    /// # Errors
+    /// Returns `Config` for invalid settings or `Unavailable` for database/schema failures.
     pub fn open(path: impl AsRef<Path>, config: Config) -> Result<Arc<Self>, Error> {
         Self::open_with_gate(path, config, WorkGate::default())
     }
@@ -180,6 +190,9 @@ impl Receiver {
         }))
     }
     /// Waits for active SQL work, closes the resource, and rejects later transactions.
+    ///
+    /// # Errors
+    /// Returns `Unavailable` if the connection mutex is poisoned.
     pub fn close(&self) -> Result<(), Error> {
         self.connection
             .lock()
@@ -189,6 +202,11 @@ impl Receiver {
     }
     /// Host-owned request adapter. Host checks POST, JSON content type and identity
     /// content encoding. Reader supplies exact raw bytes, before any JSON decoding.
+    ///
+    /// # Errors
+    /// Returns authentication, payload, policy, size/timeout, event-conflict,
+    /// business-apply or persistence errors. An unconfirmed commit may have applied;
+    /// redelivery must retain the same event ID and exact body for deduplication.
     pub async fn receive<R, F>(
         self: &Arc<Self>,
         headers: Headers,

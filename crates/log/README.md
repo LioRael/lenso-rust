@@ -31,6 +31,9 @@ objects, arrays and scalar types remain JSON, not debug text. A host-provided
 or shut down. Tracing events carry a `message` and a serialized JSON `fields`
 record. Hosts can use `StructuredJson` with their `fmt` subscriber to decode it,
 or consume that record in their own visitor. Host filtering still applies.
+Recursive logging from a subscriber or writer on the same thread is suppressed,
+including calls through another Logger, and returns success without emitting.
+Concurrent writes on different threads may enter the subscriber concurrently.
 The formatter includes `spans` with subscriber-local numeric IDs when an explicit
 scope is active. These are tracing span IDs, not distributed OTel span IDs.
 
@@ -106,8 +109,10 @@ flush callback panics; this crate does not replace that global hook.
 `close().await` atomically rejects writes on every child, waits for synchronous
 in-flight writes, and runs an explicit owned flush callback at most once. Repeated
 or concurrent close calls return the same result. Dropping a close waiter does
-not cancel the owned flush. `owned_with_flush` accepts a cooperative async
-callback and deadline: failure, panic and timeout become fixed public `LogError`
+not cancel the owned flush. A subscriber must not synchronously wait for this logger's close:
+close drains the subscriber's own active write.
+`owned_with_flush` accepts a cooperative async callback and deadline:
+failure, panic and timeout become fixed public `LogError`
 variants. On timeout its task is aborted; blocking callback code cannot be
 preempted. Borrowed constructors have no flush callback by design.
 Logger does not automatically close when a clone is dropped. Use explicit close

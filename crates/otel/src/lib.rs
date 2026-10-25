@@ -117,6 +117,9 @@ impl Telemetry {
         }
     }
     /// Official OTLP HTTP/protobuf exporter, bounded batch queue. Explicit host endpoint.
+    ///
+    /// # Errors
+    /// Returns [`TelemetryError::Configuration`] if the official exporter cannot be built.
     pub fn collector(endpoint: String, timeout: Duration) -> Result<Self, TelemetryError> {
         let exporter = opentelemetry_otlp::SpanExporter::builder()
             .with_http()
@@ -148,6 +151,10 @@ impl Telemetry {
     }
     /// Host retains its outer WorkGuard. Explicit parent is entered on every poll.
     /// Spawned work must receive a carrier explicitly; raw errors are never inspected.
+    ///
+    /// # Errors
+    /// The outer result returns `Closed` after wrapper shutdown. The inner result
+    /// preserves the business future's error; export failure does not replace it.
     pub async fn instrument<T, E, F: Future<Output = Result<T, E>>>(
         &self,
         boundary: Boundary,
@@ -208,6 +215,10 @@ impl Telemetry {
     }
     /// Call after host work drain. Owned SDK shutdown flushes; cancelled waiters
     /// cannot cancel cleanup. Custom processors must honor the SDK timeout contract.
+    ///
+    /// # Errors
+    /// Returns `Shutdown` for owned SDK shutdown or worker failures. Both providers
+    /// are attempted and later callers receive the same completion result.
     pub async fn close(&self) -> Result<(), TelemetryError> {
         {
             let mut closed = self.inner.closed.lock().unwrap_or_else(|p| p.into_inner());

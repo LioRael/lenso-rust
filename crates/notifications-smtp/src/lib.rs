@@ -42,6 +42,10 @@ impl Smtp {
     /// supplies a resolved socket address, avoiding DNS during delivery.
     /// Timeout bounds the entire SMTP session, including TLS, AUTH and QUIT.
     /// Call the synchronous Transport on a blocking worker (as Notifications does).
+    ///
+    /// # Errors
+    /// Returns `Invalid` for invalid endpoint, sender, account, TLS or timeout
+    /// configuration, or `Runtime` if the owned Tokio runtime cannot be created.
     pub fn new(
         account: &str,
         hostname: &str,
@@ -65,6 +69,9 @@ impl Smtp {
 
     /// Explicit plaintext fixture. The address is hard-coded to IPv4 loopback;
     /// credentials and arbitrary remote destinations are unavailable here.
+    ///
+    /// # Errors
+    /// Returns `Invalid` for an invalid port/timeout or `Runtime` if runtime creation fails.
     pub fn local_fixture(port: u16, timeout: Duration) -> Result<Self, Error> {
         Self::build(
             "fixture",

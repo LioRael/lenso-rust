@@ -320,6 +320,11 @@ impl<E: Send + Sync + 'static> Plugin for OrganizationPlugin<E> {
 impl<E: Send + Sync + 'static> Organization<E> {
     /// Every retry verifies host evidence again and evaluates the current relation snapshot.
     /// Accepted work is owned by a task so caller cancellation cannot abandon a DB write.
+    ///
+    /// # Errors
+    /// Returns validation, access-denial, conflict, capacity, last-owner,
+    /// closed-service or storage errors. An uncertain mutation must be reconciled
+    /// by reading current state; a failure does not authorize blind replay.
     pub async fn execute(
         self: &Arc<Self>,
         evidence: E,

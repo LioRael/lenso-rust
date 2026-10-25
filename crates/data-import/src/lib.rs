@@ -121,9 +121,13 @@ pub enum Error {
 /// Trusted synchronous business code. Only writes through `tx` share checkpoint
 /// atomicity. No network/external effects; never retain or recursively call Tasks.
 pub trait Sink: Send + Sync + 'static {
+    /// # Errors
+    /// Return a fixed public diagnostic code for rejected business rows; never include row values.
     fn validate(&self, _record: &Record) -> Result<(), &'static str> {
         Ok(())
     }
+    /// # Errors
+    /// Return business SQL or validation failures to roll back rows and cursor together.
     fn write(&self, tx: &mut SqliteTaskTransaction<'_>, rows: &[Record]) -> Result<(), TaskError>;
 }
 pub struct ImportPlugin {
@@ -179,6 +183,10 @@ impl Importer {
         }
     }
     /// Read one bounded preview from the beginning without creating a session.
+    ///
+    /// # Errors
+    /// Returns cancellation, missing/changed source, byte/row limits, malformed
+    /// framing, rejected rows under Stop policy, or storage/read failures.
     pub async fn preview(&self, key: &str, cancel: CancellationToken) -> Result<Batch, Error> {
         let _guard = self.gate.enter().map_err(|_| Error::Cancelled)?;
         self.check(&cancel)?;
@@ -192,6 +200,11 @@ impl Importer {
     }
     /// One batch per call. Repeat the SAME session id to resume/reconcile, including
     /// after a dropped waiter. A new id intentionally represents a new import.
+    ///
+    /// # Errors
+    /// Returns preview failures, invalid session ID, binding changes, stale cursor,
+    /// sink or Tasks transaction failures. An unconfirmed commit must be reconciled
+    /// with the same session ID; dispatched transactions survive waiter cancellation.
     pub async fn next(
         &self,
         id: &str,

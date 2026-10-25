@@ -44,6 +44,8 @@ pub struct AuditService<R: AuditRepository, A: AuditAuthority> {
 }
 
 impl<R: AuditRepository, A: AuditAuthority> AuditService<R, A> {
+    /// # Errors
+    /// Returns configuration failures from [`AuditConfig::validate`].
     pub fn new(
         repository: Arc<R>,
         authority: Arc<A>,
@@ -67,12 +69,14 @@ impl<R: AuditRepository, A: AuditAuthority> AuditService<R, A> {
         })
     }
 
+    #[must_use]
     pub fn with_reporter(mut self, reporter: Arc<dyn AuditReporter>) -> Self {
         self.reporter = Some(reporter);
         self
     }
 
     /// Trusted clock returning Unix milliseconds, checked before persistence.
+    #[must_use]
     pub fn with_clock(mut self, clock: impl Fn() -> u64 + Send + Sync + 'static) -> Self {
         self.clock = Arc::new(clock);
         self
@@ -192,6 +196,9 @@ impl<R: AuditRepository, A: AuditAuthority> AuditService<R, A> {
         }
     }
 
+    /// # Errors
+    /// Returns validation, authorization, relation, duplicate-conflict, storage or
+    /// closed-service errors. A storage error does not establish that no row was written.
     pub async fn append(
         &self,
         input: AuditInput,
@@ -203,6 +210,10 @@ impl<R: AuditRepository, A: AuditAuthority> AuditService<R, A> {
 
     /// Only storage failure becomes Unconfirmed. Validation, authorization,
     /// conflicts, relations, and reporter failures remain errors.
+    ///
+    /// # Errors
+    /// Returns the non-storage failures from [`Self::append`], `DiagnosticsRequired`
+    /// without a reporter, or `DiagnosticsFailed` if reporting itself fails.
     pub async fn append_best_effort(
         &self,
         input: AuditInput,
@@ -224,6 +235,9 @@ impl<R: AuditRepository, A: AuditAuthority> AuditService<R, A> {
         }
     }
 
+    /// # Errors
+    /// Returns invalid scope/ID, authorization, storage or closed-service errors.
+    /// Absence is `Ok(None)` only after query authorization succeeds.
     pub async fn get(
         &self,
         scope: &AuditScope,
@@ -238,6 +252,9 @@ impl<R: AuditRepository, A: AuditAuthority> AuditService<R, A> {
         self.load(scope, id).await
     }
 
+    /// # Errors
+    /// Returns validation, authorization, storage or closed-service errors.
+    /// Provider rows outside the authorized query or ordering contract are rejected.
     pub async fn query(
         &self,
         query: AuditQuery,
@@ -277,6 +294,11 @@ impl<R: AuditRepository, A: AuditAuthority> AuditService<R, A> {
 
     /// Ready means this call newly persisted the intent. A duplicate, failed,
     /// cancelled, or lost acknowledgement never grants permission for the effect.
+    ///
+    /// # Errors
+    /// Returns `StrictUnavailable` without durable intents, or validation,
+    /// authorization, persistence, diagnostics or closed-service failures.
+    /// Only `PrepareResult::Ready` permits proceeding with the intended effect.
     pub async fn prepare(
         &self,
         input: AuditInput,
@@ -313,6 +335,11 @@ impl<R: AuditRepository, A: AuditAuthority> AuditService<R, A> {
     /// Records with the trusted pre-effect identity snapshot, even after principal
     /// revocation. Retry the same outcome ID/content to resolve a lost response.
     /// Different IDs can record additional outcomes, just like explicit append.
+    ///
+    /// # Errors
+    /// Returns `InvalidReceipt` for another instance's receipt, `Closed` after
+    /// cleanup, or `OutcomeUnknown` when recording cannot be confirmed. Reconcile
+    /// using the same outcome ID/content; never repeat the business effect blindly.
     pub async fn complete(
         &self,
         receipt: &AuditIntentReceipt,

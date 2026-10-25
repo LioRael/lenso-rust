@@ -16,6 +16,8 @@ pub struct SqliteAuditRepository {
 }
 
 impl SqliteAuditRepository {
+    /// # Errors
+    /// Returns SQLite open/schema initialization or blocking-worker failures.
     pub async fn open(path: impl AsRef<Path>) -> Result<Self, BoxError> {
         let path = path.as_ref().to_owned();
         tokio::task::spawn_blocking(move || {

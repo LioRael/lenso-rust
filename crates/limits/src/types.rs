@@ -19,6 +19,8 @@ pub struct LimitScope {
 }
 
 impl LimitScope {
+    /// # Errors
+    /// Returns `InvalidInput` for empty parts or parts exceeding 512 UTF-16 units.
     pub fn new(
         instance: impl Into<String>,
         tenant: impl Into<String>,
@@ -63,6 +65,9 @@ pub struct ConsumeInput {
     pub period: Duration,
 }
 impl ConsumeInput {
+    /// # Errors
+    /// Returns `InvalidInput` for out-of-range quantities or nonpositive,
+    /// sub-millisecond or excessive periods.
     pub fn validate(&self) -> Result<(), LimitError> {
         quantity(self.capacity)?;
         quantity(self.quantity)?;
@@ -79,6 +84,9 @@ pub struct AcquireInput {
     pub ttl: Duration,
 }
 impl AcquireInput {
+    /// # Errors
+    /// Returns `InvalidInput` for out-of-range quantities or nonpositive,
+    /// sub-millisecond or excessive TTLs.
     pub fn validate(&self) -> Result<(), LimitError> {
         quantity(self.capacity)?;
         quantity(self.quantity)?;
@@ -126,6 +134,9 @@ pub struct Decision {
 pub struct LeaseToken(u64);
 impl LeaseToken {
     /// Store implementers/callers must issue a fresh token for each acquisition.
+    ///
+    /// # Errors
+    /// Returns `Internal` when the process-local token counter is exhausted.
     pub fn fresh() -> Result<Self, LimitError> {
         static NEXT: AtomicU64 = AtomicU64::new(1);
         let mut current = NEXT.load(Ordering::Relaxed);
@@ -220,18 +231,30 @@ impl Error for CloseError {}
 /// Never perform blocking network/DB I/O or call back into the owning `Limits`.
 /// The service supplies fresh tokens; providers must not reuse live tokens.
 pub trait LimitStore: Send + Sync + 'static {
+    /// # Errors
+    /// Returns invalid input, policy conflict, clock or provider failures.
+    /// Insufficient capacity is a denied decision, not an error.
     fn consume(&self, kind: CounterKind, input: &ConsumeInput) -> Result<Decision, LimitError>;
+    /// # Errors
+    /// Returns invalid input, conflicting policy/token, clock or provider failures.
     fn acquire(&self, input: &AcquireInput, token: LeaseToken) -> Result<Acquisition, LimitError>;
+    /// # Errors
+    /// Returns invalid TTL, clock or provider failures; an absent/expired lease is `Ok(None)`.
     fn renew(
         &self,
         scope: &LimitScope,
         token: LeaseToken,
         ttl: Duration,
     ) -> Result<Option<Lease>, LimitError>;
+    /// # Errors
+    /// Returns provider failures; repeated release of an absent token is successful.
     fn release(&self, scope: &LimitScope, token: LeaseToken) -> Result<(), LimitError>;
 
     /// Read current lease liveness without renewing it. Required by `with_lease`.
     /// The default fails safely; existing manual-only stores need not implement it.
+    ///
+    /// # Errors
+    /// Returns clock/provider failures, including `BackendFailure` when unsupported.
     fn observe(
         &self,
         _scope: &LimitScope,

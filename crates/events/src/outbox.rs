@@ -37,6 +37,9 @@ pub struct LocalOutbox {
     state: Mutex<State>,
 }
 impl LocalOutbox {
+    /// # Errors
+    /// Returns invalid limits/snapshot, corrupt JSON, or filesystem/lock errors.
+    /// The caller must provision a trusted dedicated directory first.
     pub fn open(
         root: impl AsRef<Path>,
         capacity: usize,
@@ -116,6 +119,11 @@ impl LocalOutbox {
         Ok(())
     }
     /// Success is returned only after snapshot and directory fsync.
+    ///
+    /// # Errors
+    /// Returns `Invalid` for oversized payloads, `Full` for capacity/ID exhaustion,
+    /// `Closed` for unavailable state, or persistence errors. After persistence
+    /// failure reopen and inspect: rename may already have committed.
     pub fn enqueue(&self, payload: Vec<u8>) -> Result<u64, EventError> {
         if payload.len() > self.max_event_bytes {
             return Err(EventError::Invalid);
@@ -133,6 +141,9 @@ impl LocalOutbox {
         Ok(id)
     }
     /// Read without consuming. Failed or interrupted delivery leaves records pending.
+    ///
+    /// # Errors
+    /// Returns `Closed` after close or an uncertain persistence failure.
     pub fn pending(&self, limit: usize) -> Result<Vec<OutboxRecord>, EventError> {
         let state = self.state.lock().unwrap();
         Self::check(&state)?;
@@ -145,6 +156,10 @@ impl LocalOutbox {
             .collect())
     }
     /// Call only after destination confirmation. Duplicate acknowledgements return false.
+    ///
+    /// # Errors
+    /// Returns closed-state or persistence errors. Reopen and inspect uncertain
+    /// acknowledgements rather than assuming the record is still pending.
     pub fn acknowledge(&self, id: u64) -> Result<bool, EventError> {
         let mut state = self.state.lock().unwrap();
         Self::check(&state)?;

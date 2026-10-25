@@ -47,6 +47,7 @@ impl TasksPlugin {
             options: WorkerOptions::default(),
         }
     }
+    #[must_use]
     pub fn worker_options(mut self, options: WorkerOptions) -> Self {
         self.options = options;
         self

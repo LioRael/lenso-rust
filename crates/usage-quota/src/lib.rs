@@ -95,6 +95,9 @@ pub struct UsageQuota {
 
 impl UsageQuota {
     /// Open once at startup. Separate instances/processes share SQLite write locking.
+    ///
+    /// # Errors
+    /// Returns database open, configuration, schema or commit errors.
     pub fn open(path: impl AsRef<std::path::Path>) -> Result<Self, Error> {
         let mut connection = Connection::open(path)?;
         connection.busy_timeout(Duration::from_secs(5))?;
@@ -112,6 +115,11 @@ impl UsageQuota {
 
     /// Synchronous bounded DB operation; async hosts should run it on a blocking worker.
     /// Retry only the exact same command/ID after resolving ambiguous ownership/outcome.
+    ///
+    /// # Errors
+    /// Returns invalid input/clock, conflicting operation, missing/terminal
+    /// reservation, quota exhaustion, lifecycle or persistence errors.
+    /// `CommitUnknown` requires querying the original operation before further action.
     pub fn execute(&self, operation: &str, at: i64, command: Command) -> Result<Record, Error> {
         let _work = self
             .gate
@@ -154,6 +162,9 @@ impl UsageQuota {
         Ok(record)
     }
 
+    /// # Errors
+    /// Returns lifecycle, database or decoding errors. `NotObserved` does not
+    /// prove an earlier in-flight writer cannot still commit.
     pub fn outcome(&self, operation: &str) -> Result<Outcome, Error> {
         self.read(|c| {
             Ok(match read_record(c, operation)? {
@@ -163,6 +174,8 @@ impl UsageQuota {
         })
     }
 
+    /// # Errors
+    /// Returns `Missing` for an unknown quota, or lifecycle/database errors.
     pub fn balance(&self, scope: &str) -> Result<Balance, Error> {
         self.read(|c| {
             c.query_row(
@@ -181,6 +194,8 @@ impl UsageQuota {
         })
     }
 
+    /// # Errors
+    /// Returns lifecycle, database or record-decoding errors.
     pub fn records(&self) -> Result<Vec<Record>, Error> {
         self.read(|c| {
             let mut statement = c.prepare("SELECT record FROM uq_operations ORDER BY seq")?;
@@ -189,6 +204,8 @@ impl UsageQuota {
         })
     }
 
+    /// # Errors
+    /// Returns lifecycle or database errors.
     pub fn api_calls(&self, scope: &str) -> Result<i64, Error> {
         self.read(|c| {
             Ok(c.query_row(
@@ -209,6 +226,9 @@ impl UsageQuota {
         f(lock.as_ref().ok_or(Error::Closed)?)
     }
 
+    /// # Errors
+    /// Returns `Poisoned` or a database close error. A failed close retains the
+    /// connection so the caller can retry.
     pub fn close(&self) -> Result<(), Error> {
         let mut lock = self.connection.lock().map_err(|_| Error::Poisoned)?;
         if let Some(connection) = lock.take() {

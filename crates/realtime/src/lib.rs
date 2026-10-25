@@ -52,6 +52,8 @@ impl<P> Clone for MemoryRealtime<P> {
 impl<P: Send + Sync + 'static> MemoryRealtime<P> {
     /// No background tasks or external resources are acquired here.
     /// The callback runs only on subscribe and explicit renew. None denies.
+    /// # Errors
+    /// Returns configuration failures from [`RealtimeConfig::validate`].
     pub fn new<F, Fut>(config: RealtimeConfig, authorize: F) -> Result<Self, RealtimeError>
     where
         F: Fn(Arc<Identity<P>>, Resource) -> Fut + Send + Sync + 'static,
@@ -73,6 +75,9 @@ impl<P: Send + Sync + 'static> MemoryRealtime<P> {
         })
     }
     /// The caller owns verifying this identity. Scope equality is an additional check.
+    /// # Errors
+    /// Returns an error for invalid/expired identity, closed service, or exceeded
+    /// connection and per-subject limits.
     pub fn connect(&self, identity: Identity<P>) -> Result<Connection<P>, RealtimeError> {
         contracts::part(&identity.scope)?;
         contracts::part(&identity.subject)?;
@@ -114,6 +119,10 @@ impl<P: Send + Sync + 'static> MemoryRealtime<P> {
     }
     /// Ephemeral fan-out to currently authorized subscribers. No history or ACKs.
     /// Publish access must be enforced by the host's business service.
+    /// # Errors
+    /// Returns an error for invalid resource/event identifiers, oversized or
+    /// overly nested payloads, or a closed service. Slow consumers are reported
+    /// through the publish report and terminal gap, not a publish error.
     pub fn publish(
         &self,
         resource: &Resource,
@@ -197,6 +206,8 @@ impl<P: Send + Sync + 'static> MemoryRealtime<P> {
         }
     }
     /// Local fast path for an exact (scope, subject), never a wildcard match.
+    /// # Errors
+    /// Returns [`RealtimeError::InvalidInput`] for invalid scope or subject labels.
     pub fn revoke_subject(&self, scope: &str, subject: &str) -> Result<(), RealtimeError> {
         contracts::part(scope)?;
         contracts::part(subject)?;
@@ -269,6 +280,10 @@ impl<P> Drop for Connection<P> {
 }
 impl<P: Send + Sync + 'static> Connection<P> {
     /// Reserves all limits before invoking host authorization.
+    /// # Errors
+    /// Returns an error for invalid or cross-scope resources, closed/expired
+    /// connections, exhausted capacity, or authorization refusal/timeout.
+    /// Cancelled authorization cannot install a subscription.
     pub async fn subscribe(&self, resource: Resource) -> Result<Subscription<P>, RealtimeError> {
         let operation = {
             let mut state = lock(&self.inner.state);
@@ -411,6 +426,10 @@ impl<P: Send + Sync + 'static> Subscription<P> {
     }
     /// Reauthorize before the old lease expires. Concurrent renewals are rejected.
     /// Cancellation of an admitted renewal fails closed and removes this lease.
+    /// # Errors
+    /// Returns an error for expired/closed subscriptions, concurrent renewal,
+    /// exhausted capacity, or authorization refusal/timeout. Failed admitted
+    /// renewal removes the subscription rather than reviving its old lease.
     pub async fn renew(&self) -> Result<(), RealtimeError> {
         let operation = {
             let mut state = lock(&self.inner.state);

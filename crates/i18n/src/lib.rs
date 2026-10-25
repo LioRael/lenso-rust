@@ -159,6 +159,9 @@ pub struct I18n {
     gate: WorkGate,
 }
 impl I18n {
+    /// # Errors
+    /// Returns `Invalid` for malformed/oversized language headers or `Closed`
+    /// when admission or catalog access is unavailable.
     pub fn request(&self, accept_language: &str) -> Result<RequestLocale, Error> {
         let _guard = self.gate.enter().map_err(|_| Error::Closed)?;
         let catalog = self
@@ -174,6 +177,10 @@ impl I18n {
         })
     }
     /// Validate completely before atomically installing a strictly newer snapshot.
+    ///
+    /// # Errors
+    /// Returns `Invalid` for an inconsistent catalog, `Version` for a non-increasing
+    /// version, or `Closed` when admission/catalog access is unavailable.
     pub fn replace(&self, catalog: Catalog) -> Result<(), Error> {
         let _guard = self.gate.enter().map_err(|_| Error::Closed)?;
         catalog.validate()?;
@@ -204,6 +211,9 @@ impl RequestLocale {
             .map(String::as_str)
             .ok_or(Error::Missing)
     }
+    /// # Errors
+    /// Returns `Missing` without a localized/fallback message, `Invalid` for
+    /// mismatched variables or size limits, or `Closed` after admission is sealed.
     pub fn text(&self, key: &str, vars: &Variables) -> Result<String, Error> {
         let _guard = self.gate.enter().map_err(|_| Error::Closed)?;
         let source = self.message(key)?;
@@ -229,6 +239,9 @@ impl RequestLocale {
         Ok(out)
     }
     /// Escapes the entire message for an HTML text node. Not for URLs, JS, CSS or attributes.
+    ///
+    /// # Errors
+    /// Returns the message, variable and lifecycle failures from [`Self::text`].
     pub fn html_text(&self, key: &str, vars: &Variables) -> Result<String, Error> {
         Ok(self
             .text(key, vars)?
@@ -240,6 +253,9 @@ impl RequestLocale {
     }
     /// Selects raw, validated plain-text templates for Notifications' own single-pass interpolation.
     /// The host owns name/category/required; catalog version identifies immutable message content.
+    ///
+    /// # Errors
+    /// Returns `Missing` for an unavailable message key or `Closed` after admission is sealed.
     pub fn notification(
         &self,
         mut template: lenso_notifications::Template,

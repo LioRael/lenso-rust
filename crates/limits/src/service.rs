@@ -45,10 +45,15 @@ impl<S: LimitStore> Limits<S> {
         }
     }
 
+    /// # Errors
+    /// Returns invalid input, policy conflict, closed/internal errors, or backend
+    /// failure under `FailurePolicy::Error`. Exhaustion is a denied decision.
     pub fn consume_rate(&self, input: &ConsumeInput) -> Result<Decision, LimitError> {
         self.consume(CounterKind::Rate, input)
     }
 
+    /// # Errors
+    /// Returns the same validation, lifecycle and provider failures as [`Self::consume_rate`].
     pub fn consume_quota(&self, input: &ConsumeInput) -> Result<Decision, LimitError> {
         self.consume(CounterKind::Quota, input)
     }
@@ -61,6 +66,9 @@ impl<S: LimitStore> Limits<S> {
             .or_else(|error| self.failure(error))
     }
 
+    /// # Errors
+    /// Returns invalid input, policy conflict, closed/internal errors, or backend
+    /// failure under `FailurePolicy::Error`. Fail-open admission never fabricates a lease.
     pub fn acquire(&self, input: &AcquireInput) -> Result<Acquisition, LimitError> {
         input.validate()?;
         let mut state = self.open()?;
@@ -80,6 +88,10 @@ impl<S: LimitStore> Limits<S> {
     }
 
     /// Renewal never applies fail-open/fail-closed admission policy.
+    ///
+    /// # Errors
+    /// Returns invalid TTL/scope, closed/internal or provider errors.
+    /// Lost or expired leases return `Ok(None)` and cannot be revived.
     pub fn renew(&self, lease: &Lease, ttl: Duration) -> Result<Option<Lease>, LimitError> {
         duration_ms(ttl)?;
         let mut state = self.open()?;
@@ -96,6 +108,9 @@ impl<S: LimitStore> Limits<S> {
     }
 
     /// Idempotent; failures remain visible and retain ownership for close to retry.
+    ///
+    /// # Errors
+    /// Returns invalid ownership scope, closed/internal or provider errors.
     pub fn release(&self, lease: &Lease) -> Result<(), LimitError> {
         let mut state = self.open()?;
         check_scope(&state, lease)?;
@@ -111,6 +126,10 @@ impl<S: LimitStore> Limits<S> {
     /// releasing any leases; use `close_async` to drain and finish. This transitional
     /// result is not cached. A final release failure is not silently retried. Remaining leases
     /// expire by TTL or can be released directly through the borrowed store.
+    ///
+    /// # Errors
+    /// Returns aggregated release/internal failures, or transitional `ActiveRuns`
+    /// requiring [`Self::close_async`] before resource release.
     pub fn close(&self) -> Result<(), CloseError> {
         // Seal immediately, even if a store call still owns the state lock.
         self.closing.store(true, Ordering::Release);
@@ -152,6 +171,9 @@ impl<S: LimitStore> Limits<S> {
     /// Cancel executions and drain them before releasing leases. Dropping this waiter
     /// does not cancel the owned close task; keep the Tokio runtime alive to finish.
     /// Call from outside the execution being drained to avoid waiting on yourself.
+    ///
+    /// # Errors
+    /// Returns aggregated release failures or internal runtime/synchronization failures.
     pub async fn close_async(self: &Arc<Self>) -> Result<(), CloseError> {
         match self.close() {
             Err(error) if error.failures() == [LimitError::ActiveRuns] => {}
@@ -179,6 +201,9 @@ impl<S: LimitStore> Limits<S> {
 
     /// Stop admitting wrappers and signal existing ones, without closing manual APIs.
     /// Used at the plugin's Entrances phase so WorkGate drain can make progress.
+    ///
+    /// # Errors
+    /// Returns `Internal` if the service mutex is poisoned.
     pub fn stop_runs(&self) -> Result<(), LimitError> {
         let mut state = self.state.lock().map_err(|_| LimitError::Internal)?;
         state.runs_stopping = true;

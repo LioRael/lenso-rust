@@ -256,6 +256,10 @@ pub struct Evaluation {
     pub cancellation: Cancellation,
 }
 impl Evaluation {
+    /// Check cooperative evaluation cancellation.
+    ///
+    /// # Errors
+    /// Returns [`EvaluationError`] if cancellation has been requested.
     pub fn ensure_active(&self) -> Result<(), EvaluationError> {
         if self.cancellation.is_cancelled() {
             Err(EvaluationError)

@@ -56,6 +56,10 @@ impl<I: Send + Sync + 'static> McpServer<I> {
     /// Host lifecycle update, never a tool. Notify only after atomic replacement.
     /// Before initialization no notification is needed. After initialization,
     /// a send failure leaves the valid new catalog installed.
+    ///
+    /// # Errors
+    /// Returns [`StdioError::Catalog`] if replacement is refused, or
+    /// [`StdioError::Transport`] if notifying an initialized peer fails.
     pub async fn replace_operations(
         &self,
         operations: Vec<Operation<I>>,
@@ -72,11 +76,18 @@ impl<I: Send + Sync + 'static> McpServer<I> {
         Ok(())
     }
     /// Run a dedicated local stdio process. Keep every application log on stderr.
+    ///
+    /// # Errors
+    /// Returns the initialization or transport failures described by [`Self::run_io`].
     pub async fn run_stdio(self, shutdown: CancellationToken) -> Result<(), StdioError> {
         self.run_io(tokio::io::stdin(), tokio::io::stdout(), shutdown)
             .await
     }
     /// Same SDK bridge over host-owned pipes; no socket or listener is created.
+    ///
+    /// # Errors
+    /// Returns [`StdioError`] when SDK initialization times out or negotiation or
+    /// transport fails. Accepted adapter work is drained before returning.
     pub async fn run_io<R, W>(
         self,
         read: R,

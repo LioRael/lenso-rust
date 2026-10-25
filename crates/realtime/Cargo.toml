@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 description = "Bounded process-local resource subscriptions with explicit authorization leases"
 
+[lints]
+workspace = true
+
 [dependencies]
 lenso-plugin-core.workspace = true
 tokio.workspace = true

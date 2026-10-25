@@ -46,11 +46,17 @@ impl Default for AggregateConfig {
 }
 
 /// Aggregates with the batch contract's default classification.
+///
+/// # Errors
+/// Returns [`AggregateError`] for an empty batch or arithmetic overflow.
 pub fn aggregate(logs: &[LogRecord]) -> Result<Summary, AggregateError> {
     aggregate_with_cancellation(logs, || false)
 }
 
 /// Checks cancellation before each record, after rejecting an empty batch.
+///
+/// # Errors
+/// Returns [`AggregateError`] for an empty batch, cancellation, or arithmetic overflow.
 pub fn aggregate_with_cancellation(
     logs: &[LogRecord],
     cancelled: impl FnMut() -> bool,

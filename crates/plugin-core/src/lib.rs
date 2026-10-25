@@ -89,6 +89,10 @@ pub trait Plugin: Send + 'static {
     /// Ordinary Rust service published by this instance.
     type Service: Send + Sync + 'static;
     /// Check configuration synchronously without acquiring resources.
+    ///
+    /// # Errors
+    /// Implementations return an error for invalid configuration. Core reports a
+    /// sanitized validation failure and does not run any setup.
     fn validate(&self) -> Result<(), BoxError> {
         Ok(())
     }
@@ -155,6 +159,10 @@ pub struct CleanupHandle {
 impl CleanupHandle {
     /// Dispose once and share completion, even when a disposal waiter is cancelled.
     /// A failed early disposal remains visible to later rollback/shutdown.
+    ///
+    /// # Errors
+    /// Returns the registered callback's error or task panic as [`CleanupFailure`].
+    /// Repeated disposal returns the same failure without retrying cleanup.
     pub async fn dispose(&self) -> Result<(), CleanupFailure> {
         let mut completion = self.inner.completion.subscribe();
         let mut action = self.inner.action.lock().await;
@@ -202,6 +210,10 @@ impl Setup {
         &self.instance
     }
     /// Get a declared dependency. Undeclared and unavailable handles are errors.
+    ///
+    /// # Errors
+    /// Returns [`AccessError`] if the handle was not declared, its service is
+    /// unavailable, or the stored service type does not match the handle.
     pub fn get<S: Send + Sync + 'static>(&self, handle: &Handle<S>) -> Result<Arc<S>, AccessError> {
         if !self.dependencies.contains(&handle.key) {
             return Err(AccessError::Undeclared);
@@ -281,6 +293,9 @@ pub struct WorkGate(Arc<Admission>);
 
 impl WorkGate {
     /// Atomically admit work unless shutdown has sealed the gate.
+    ///
+    /// # Errors
+    /// Returns [`AccessError::Closing`] if sealed or the in-flight counter is full.
     pub fn enter(&self) -> Result<WorkGuard, AccessError> {
         let mut state = self.0.state.load(Ordering::Acquire);
         loop {
@@ -375,6 +390,7 @@ impl App {
         handle
     }
     /// Add an owned instance to this app.
+    #[must_use]
     pub fn with<P: Plugin>(mut self, instance: Instance<P>) -> Self {
         self.insert(instance);
         self
@@ -461,6 +477,11 @@ impl App {
     /// this waiter is cancelled, and shuts down an app not acknowledged by its
     /// caller. Setup errors and unwind panics roll back registered resources.
     /// Runtime termination and abort-on-panic are outside this guarantee.
+    ///
+    /// # Errors
+    /// Returns [`StartError::Validation`] for invalid configuration or dependency
+    /// graphs, or [`StartError::Setup`] with the original failure and any rollback
+    /// failures. Validation does not acquire plugin resources.
     pub async fn start(self) -> Result<RunningApp, StartError> {
         let (delivery, receiver) = oneshot::channel();
         let (acknowledge, acknowledged) = oneshot::channel();
@@ -616,6 +637,10 @@ impl RunningApp {
     }
     /// Get a service while the app is open. Retained services must use the gate
     /// at business entry; merely obtaining an `Arc` does not admit work.
+    ///
+    /// # Errors
+    /// Returns [`AccessError`] when shutdown has sealed admission, the handle is
+    /// unavailable in this app, or its stored service type does not match.
     pub fn get<S: Send + Sync + 'static>(&self, handle: &Handle<S>) -> Result<Arc<S>, AccessError> {
         let _access = self.inner.gate.enter()?;
         get_service(&self.inner.services, handle)
@@ -625,6 +650,10 @@ impl RunningApp {
     /// Once polled past lifecycle acquisition, cleanup runs in a detached Tokio
     /// task even if this waiter is cancelled. Keep the Tokio runtime alive until
     /// completion; no asynchronous `Drop` behavior is promised.
+    ///
+    /// # Errors
+    /// Returns [`ShutdownError`] containing every cleanup failure, after attempting
+    /// all callbacks. Concurrent and later callers receive the same result.
     pub async fn shutdown(&self) -> Result<(), ShutdownError> {
         let mut completion = self.inner.completion.subscribe();
         let mut cleanups = self.inner.cleanups.lock().await;

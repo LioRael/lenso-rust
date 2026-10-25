@@ -122,6 +122,9 @@ pub trait ObjectStorage: Send + Sync {
     fn list(&self, options: ListOptions) -> StorageFuture<'_, ObjectPage>;
 }
 
+/// # Errors
+/// Returns `InvalidInput` for empty/oversized keys, absolute paths, traversal,
+/// empty components, control characters, backslashes or drive-letter prefixes.
 pub fn validate_key(key: &str) -> Result<(), StorageError> {
     let bytes = key.as_bytes();
     if key.is_empty()

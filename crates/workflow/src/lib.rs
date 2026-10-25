@@ -309,6 +309,9 @@ impl Workflow {
         &self.definition.version
     }
     /// Explicit schema provisioning on the existing Tasks-owned connection.
+    ///
+    /// # Errors
+    /// Returns Tasks admission, non-SQLite provider, SQL or transaction failures.
     pub async fn provision(&self) -> Result<(), TaskError> {
         self.tasks
             .sqlite_transaction(|tx| {
@@ -317,6 +320,9 @@ impl Workflow {
             })
             .await
     }
+    /// # Errors
+    /// Returns invalid ID/payload or Tasks transaction failures. Conflicting
+    /// definitions and repeated starts are reported as [`Outcome`] values.
     pub async fn start(&self, id: String, input: Value) -> Result<Outcome, TaskError> {
         valid(&id, 128)?;
         payload(&input)?;
@@ -350,6 +356,8 @@ impl Workflow {
             .await
     }
     /// Receipt query after an unconfirmed COMMIT; missing is only a snapshot.
+    /// # Errors
+    /// Returns invalid ID/checkpoint encoding or Tasks transaction failures.
     pub async fn checkpoint(&self, id: String) -> Result<Option<Checkpoint>, TaskError> {
         valid(&id, 128)?;
         let queue = self.tasks.identity().to_owned();
@@ -360,6 +368,9 @@ impl Workflow {
     }
     /// Advance one step: reconcile a Tasks receipt or execute one same-DB
     /// transaction callback. Signals wait for signal(). No scheduler is created.
+    /// # Errors
+    /// Returns invalid input/checkpoint, transaction-handler or Tasks failures.
+    /// Earlier steps may have committed; reconcile via the persisted checkpoint.
     pub async fn resume(&self, id: String) -> Result<Outcome, TaskError> {
         let Some(cp) = self.checkpoint(id.clone()).await? else {
             return Ok(Outcome::Missing);
@@ -452,6 +463,9 @@ impl Workflow {
     }
     /// Only explicitly failed Tasks qualify. Concurrent cancellation can leave a
     /// harmless read queued, but cannot advance the cancelled checkpoint.
+    /// # Errors
+    /// Returns invalid ID/checkpoint or Tasks failures. Job reopening and checkpoint
+    /// progress can precede a later error; inspect state before retrying again.
     pub async fn retry(&self, id: String) -> Result<Outcome, TaskError> {
         let Some(cp) = self.checkpoint(id).await? else {
             return Ok(Outcome::Missing);
@@ -476,6 +490,9 @@ impl Workflow {
     }
     /// One immutable receipt per signal step. Out-of-order signals are not
     /// buffered. Hosts authenticate/authorize senders; keys are not credentials.
+    /// # Errors
+    /// Returns invalid signal/ID/payload or Tasks transaction failures. Duplicate,
+    /// conflicting and out-of-order signals are represented by [`Outcome`].
     pub async fn signal(
         &self,
         id: String,
@@ -539,6 +556,9 @@ impl Workflow {
             .await
     }
     /// Cancel checkpoint first, then Tasks; repeat to repair a crash between calls.
+    /// # Errors
+    /// Returns invalid ID/checkpoint or Tasks failures. Cancellation never rolls
+    /// back previously committed business steps.
     pub async fn cancel(&self, id: String) -> Result<Outcome, TaskError> {
         valid(&id, 128)?;
         let queue = self.tasks.identity().to_owned();
@@ -571,6 +591,8 @@ impl Workflow {
         Ok(outcome)
     }
     /// Completed transaction/task output is the generic workflow result receipt.
+    /// # Errors
+    /// Returns the checkpoint-read failures from [`Self::checkpoint`].
     pub async fn result(&self, id: String) -> Result<Option<Value>, TaskError> {
         Ok(self
             .checkpoint(id)
