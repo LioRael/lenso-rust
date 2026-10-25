@@ -81,6 +81,9 @@ fn identity(i: &Identity) -> bool {
 }
 impl Configuration {
     /// Bounded fixture parsing; errors never echo config contents.
+    ///
+    /// # Errors
+    /// Returns `Invalid` for oversized/malformed JSON or invalid configuration.
     pub fn from_json(bytes: &[u8]) -> Result<Self, FlagError> {
         if bytes.len() > 1024 * 1024 {
             return Err(FlagError::Invalid);
@@ -89,6 +92,9 @@ impl Configuration {
         value.validate()?;
         Ok(value)
     }
+    /// # Errors
+    /// Returns `Invalid` for invalid labels, duplicate identities, excessive rules
+    /// or invalid rollout basis points.
     pub fn validate(&self) -> Result<(), FlagError> {
         if !valid(&self.version) || self.flags.len() > 256 {
             return Err(FlagError::Invalid);
@@ -130,6 +136,8 @@ pub struct FeatureFlags {
     state: Arc<Mutex<State>>,
 }
 impl FeatureFlags {
+    /// # Errors
+    /// Returns configuration failures from [`Configuration::validate`].
     pub fn new(config: Configuration) -> Result<Self, FlagError> {
         config.validate()?;
         Ok(Self {
@@ -142,6 +150,10 @@ impl FeatureFlags {
         })
     }
     /// CAS guards against concurrent administrators and ABA after rollback.
+    ///
+    /// # Errors
+    /// Returns `Invalid`, `Conflict`, `Exhausted`, `Closed` or `Unavailable`;
+    /// failed publication leaves the current snapshot unchanged.
     pub fn publish(&self, expected: u64, config: Configuration) -> Result<u64, FlagError> {
         config.validate()?;
         let mut state = self.state.lock().map_err(|_| FlagError::Unavailable)?;
@@ -170,6 +182,10 @@ impl FeatureFlags {
         Ok(next)
     }
     /// Restore a retained revision as a NEW revision; old requests keep their snapshot.
+    ///
+    /// # Errors
+    /// Returns `NotRetained` for an evicted target, or conflict, exhaustion,
+    /// lifecycle or synchronization failures.
     pub fn rollback(&self, expected: u64, target: u64) -> Result<u64, FlagError> {
         let mut state = self.state.lock().map_err(|_| FlagError::Unavailable)?;
         if state.closed {
@@ -202,6 +218,8 @@ impl FeatureFlags {
         })();
         Snapshot { context, captured }
     }
+    /// # Errors
+    /// Returns `Unavailable` if the state mutex is poisoned.
     pub fn close(&self) -> Result<(), FlagError> {
         let mut state = self.state.lock().map_err(|_| FlagError::Unavailable)?;
         state.closed = true;

@@ -177,6 +177,11 @@ impl AuthorizationOptions {
             explain: None,
         }
     }
+    /// Validate actions, rules, identity restrictions and explain configuration.
+    ///
+    /// # Errors
+    /// Returns [`ConfigurationError`] for invalid identifiers, duplicate actions
+    /// or rules, unsupported timeouts, or inconsistent policy references.
     pub fn validate(&self) -> Result<(), ConfigurationError> {
         let actions: HashSet<_> = self.actions.iter().collect();
         if actions.is_empty()
@@ -224,6 +229,10 @@ impl AuthorizationOptions {
 #[derive(Clone)]
 pub struct Authorization(Arc<AuthorizationOptions>);
 impl Authorization {
+    /// Construct a policy engine without acquiring resources.
+    ///
+    /// # Errors
+    /// Returns the failures from [`AuthorizationOptions::validate`].
     pub fn new(options: AuthorizationOptions) -> Result<Self, ConfigurationError> {
         options.validate()?;
         Ok(Self(Arc::new(options)))
@@ -242,6 +251,10 @@ impl Authorization {
     pub async fn can(&self, request: Request) -> bool {
         self.check(request).await.is_allowed()
     }
+    /// Require an allow decision; no policy failure is treated as permission.
+    ///
+    /// # Errors
+    /// Returns [`AuthorizationError`] for denial, invalid facts, timeout, or failed evaluation.
     pub async fn enforce(&self, request: Request) -> Result<(), AuthorizationError> {
         if self.can(request).await {
             Ok(())
@@ -249,6 +262,10 @@ impl Authorization {
             Err(AuthorizationError)
         }
     }
+    /// Enforce a decision with caller-controlled cancellation.
+    ///
+    /// # Errors
+    /// Returns [`AuthorizationError`] for cancellation or any non-allow decision.
     pub async fn enforce_with_cancellation(
         &self,
         request: Request,
@@ -264,6 +281,11 @@ impl Authorization {
             Err(AuthorizationError)
         }
     }
+    /// Explain a target only after authorizing the exact configured management resource.
+    ///
+    /// # Errors
+    /// Returns [`AuthorizationError`] if explanation is disabled, the management
+    /// resource does not match, or the manager is not allowed.
     pub async fn explain(
         &self,
         manager: Request,

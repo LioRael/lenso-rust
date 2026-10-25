@@ -36,6 +36,10 @@ jobs:
           cargo run --locked -p lenso-webhook-receiver --example partner_order
           node crates/webhook-receiver/tests/verify-fixture.mjs
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - name: Check public Rust documentation
+        run: cargo doc --workspace --all-features --locked --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
   candidate:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest

@@ -14,6 +14,9 @@ name = "lenso-mcp-demo"
 path = "src/bin/demo.rs"
 required-features = ["stdio"]
 
+[lints]
+workspace = true
+
 [dependencies]
 rmcp = { version = "=3.5.0", default-features = false, features = ["server", "transport-io"], optional = true }
 lenso-plugin-core.workspace = true

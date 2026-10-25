@@ -332,6 +332,9 @@ impl Default for AuditConfig {
 
 impl AuditConfig {
     /// Pure validation, also called before plugin setup acquires any resources.
+    ///
+    /// # Errors
+    /// Returns [`AuditError::InvalidInput`] for invalid page limits or summary policy.
     pub fn validate(&self) -> Result<(), AuditError> {
         crate::validation::config(self)
     }

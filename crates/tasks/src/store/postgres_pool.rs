@@ -48,6 +48,7 @@ impl PostgresOptions {
     }
 
     /// Number of connections opened at startup, from 1 through 64 (default 4).
+    #[must_use]
     pub fn max_connections(mut self, count: usize) -> Self {
         self.max_connections = count;
         self
@@ -55,6 +56,7 @@ impl PostgresOptions {
 
     /// Maximum time waiting for a pool slot, excluding connection and SQL time.
     /// Must be positive and at most one hour; default five seconds.
+    #[must_use]
     pub fn checkout_timeout(mut self, timeout: Duration) -> Self {
         self.checkout_timeout = timeout;
         self

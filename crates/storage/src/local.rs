@@ -36,6 +36,9 @@ impl LocalStorageConfig {
             max_upload_bytes: None,
         }
     }
+    /// # Errors
+    /// Returns `Unsupported` outside Unix, or `InvalidInput` for an empty root or
+    /// parent-directory traversal components.
     pub fn validate(&self) -> Result<()> {
         if !cfg!(unix) {
             return Err(StorageError::new(ErrorCode::Unsupported));
@@ -101,6 +104,9 @@ async fn blocking<T: Send + 'static>(
 }
 
 impl LocalStorage {
+    /// # Errors
+    /// Returns configuration, filesystem or worker errors. Unsafe root ancestry
+    /// is rejected rather than followed.
     pub async fn open(mut config: LocalStorageConfig) -> Result<Self> {
         config.validate()?;
         if config.root.is_relative() {
@@ -140,6 +146,10 @@ impl LocalStorage {
     /// Seals this service, cancels owned operations/downloads, then waits for cleanup.
     /// Concurrent/repeated close calls are supported; cancelling a waiter does not
     /// cancel cleanup. Committed objects and other instances' temporary files remain.
+    ///
+    /// # Errors
+    /// Returns `Provider` if owned operation cleanup failed. The service remains
+    /// closed and later close calls retain that failure.
     pub async fn close(&self) -> Result<()> {
         {
             let mut closing = self.inner.closing.lock().expect("storage lifecycle mutex");
@@ -186,6 +196,10 @@ impl LocalStorage {
         result
     }
 
+    /// # Errors
+    /// Returns input/metadata, size-limit, source-read, cancellation, collision or
+    /// filesystem errors. Publication can precede observed cancellation; reconcile
+    /// uncertain outcomes with `head`. Cleanup failure retains the primary cause.
     pub async fn put(&self, input: PutObject) -> Result<ObjectMetadata> {
         self.run(
             input.cancellation.clone(),
@@ -194,6 +208,9 @@ impl LocalStorage {
         .await
     }
 
+    /// # Errors
+    /// Returns invalid key/range, missing object, ETag conflict, cancellation or
+    /// provider errors. Corrupt objects are errors, not absence.
     pub async fn get(&self, key: &str, options: ReadOptions) -> Result<ObjectDownload> {
         let key = key.to_owned();
         self.run(
@@ -243,6 +260,9 @@ impl LocalStorage {
         .await
     }
 
+    /// # Errors
+    /// Returns invalid key, cancellation or provider errors. Only an absent object
+    /// yields `Ok(None)`; corrupt metadata is not treated as a miss.
     pub async fn head(
         &self,
         key: &str,
@@ -267,6 +287,9 @@ impl LocalStorage {
         .await
     }
 
+    /// # Errors
+    /// Returns invalid key, cancellation or provider errors. An error can follow
+    /// logical deletion; retrying deletion also recovers an owned partial tomb.
     pub async fn delete(&self, key: &str, options: OperationOptions) -> Result<DeleteOutcome> {
         let key = key.to_owned();
         self.run(options.cancellation, move |inner, signals| async move {
@@ -299,6 +322,9 @@ impl LocalStorage {
         .await
     }
 
+    /// # Errors
+    /// Returns invalid listing options, cancellation, or provider errors for unsafe,
+    /// corrupt or unreadable entries. No partial page is returned on failure.
     pub async fn list(&self, options: ListOptions) -> Result<ObjectPage> {
         self.run(
             options.cancellation.clone(),

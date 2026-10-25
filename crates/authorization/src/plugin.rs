@@ -15,6 +15,10 @@ pub struct AuthorizationPlugin {
 }
 impl AuthorizationPlugin {
     /// Prevalidate ordinary options before installing a resource-free service.
+    /// Validate policy options before installing the plugin.
+    ///
+    /// # Errors
+    /// Returns the failures from [`AuthorizationOptions::validate`].
     pub fn new(options: AuthorizationOptions) -> Result<Self, ConfigurationError> {
         let service = Arc::new(Authorization::new(options)?);
         Ok(Self::setup(vec![], move |_| {

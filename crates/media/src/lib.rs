@@ -66,7 +66,7 @@ pub struct Preset {
     /// Aspect-preserving fit inside this box.
     pub width: u32,
     pub height: u32,
-    /// Optional pixel rectangle [x,y,width,height] applied before resize.
+    /// Optional pixel rectangle `[x, y, width, height]` applied before resize.
     pub crop: Option<[u32; 4]>,
     pub format: Format,
 }
@@ -209,6 +209,11 @@ impl Media {
     }
     /// Non-queued admission: one job per instance bounds aggregate decode memory.
     /// The owned task continues if its caller drops the future; shutdown drains it.
+    ///
+    /// # Errors
+    /// Returns invalid preset, authorization/stale-source, resource-limit, busy,
+    /// image, storage, journal or worker errors. An error may follow publication;
+    /// retrying the same source/preset consults the durable manifest.
     pub async fn derive(self: &Arc<Self>, source: Source, preset: String) -> Result<Derived> {
         let guard = self.gate.enter().map_err(|_| Error::Busy)?;
         let slot = self
@@ -291,6 +296,10 @@ impl Media {
         result
     }
     /// Returns bounded bytes after fresh host authorization and source version check.
+    ///
+    /// # Errors
+    /// Returns authorization, stale/forged reference, limit, busy, storage, journal
+    /// or worker errors. No bytes are returned if final source validation fails.
     pub async fn read(self: &Arc<Self>, derived: &Derived) -> Result<Vec<u8>> {
         let guard = self.gate.enter().map_err(|_| Error::Busy)?;
         let slot = self
@@ -347,6 +356,8 @@ impl Media {
         self.current(&derived.source).await?;
         Ok(bytes)
     }
+    /// # Errors
+    /// Returns authorization/stale-source, limit, busy, storage, image or worker errors.
     pub async fn inspect(self: &Arc<Self>, source: Source) -> Result<(u32, u32)> {
         let guard = self.gate.enter().map_err(|_| Error::Busy)?;
         let slot = self

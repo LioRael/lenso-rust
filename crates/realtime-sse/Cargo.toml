@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 description = "Demand-driven SSE adapter for Lenso realtime connections"
 
+[lints]
+workspace = true
+
 [dependencies]
 lenso-realtime = { path = "../realtime" }
 bytes = "1"

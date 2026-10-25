@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 description = "Atomic in-memory rate, quota and weighted lease limits with explicit lifecycle"
 
+[lints]
+workspace = true
+
 [dependencies]
 lenso-plugin-core.workspace = true
 tokio.workspace = true

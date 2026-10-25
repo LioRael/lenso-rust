@@ -130,6 +130,9 @@ fn decode<T: serde::de::DeserializeOwned>(s: &str) -> Result<T, Error> {
     serde_json::from_str(s).map_err(|_| Error::Storage)
 }
 /// Explicit schema provisioning in a dedicated database. Never called by startup.
+///
+/// # Errors
+/// Returns `Storage` for SQLite open/DDL failures or `Runtime` if the worker fails.
 pub async fn provision(path: impl AsRef<Path>) -> Result<(), Error> {
     let path = path.as_ref().to_owned();
     tokio::task::spawn_blocking(move || {
@@ -155,6 +158,9 @@ pub struct Notifications {
     gate: WorkGate,
 }
 impl Notifications {
+    /// # Errors
+    /// Returns invalid transport identity/schema, storage or blocking-worker errors.
+    /// The database must already be provisioned.
     pub async fn open(
         path: impl AsRef<Path>,
         transport: Arc<dyn Transport>,
@@ -200,6 +206,9 @@ impl Notifications {
         .map_err(|_| Error::Runtime)?
     }
     /// Optional category preference is evaluated once at create; required templates bypass it.
+    ///
+    /// # Errors
+    /// Returns invalid scope/category, closed-service, storage or runtime errors.
     pub async fn set_preference(
         &self,
         s: Scope,
@@ -210,6 +219,10 @@ impl Notifications {
         name(&category)?;
         self.run(move |db,_| { db.execute("INSERT INTO preferences VALUES(?1,?2,?3,?4) ON CONFLICT(tenant,owner,category) DO UPDATE SET enabled=excluded.enabled", params![s.tenant,s.owner,category,enabled])?; Ok(()) }).await
     }
+    /// # Errors
+    /// Returns invalid input/template variables, immutable business-key conflict,
+    /// closed-service, storage or runtime errors. Reconcile uncertain creation
+    /// using the same request and business key.
     pub async fn create(&self, request: Request) -> Result<Receipt, Error> {
         scope(&request.scope)?;
         name(&request.business_key)?;
@@ -236,12 +249,19 @@ impl Notifications {
             save(&tx,&receipt)?; tx.commit()?; Ok(receipt)
         }).await
     }
+    /// # Errors
+    /// Returns invalid scope, missing receipt, closed-service, storage or runtime errors.
     pub async fn status(&self, s: Scope, id: i64) -> Result<Receipt, Error> {
         scope(&s)?;
         self.run(move |db, _| load(db, &s, id)).await
     }
     /// Sends only Pending or definitively Rejected records, at most ten attempts.
     /// Unknown is terminal for automated delivery, even within a provider dedupe window.
+    ///
+    /// # Errors
+    /// Returns invalid scope, missing receipt, changed provider, closed-service,
+    /// storage or runtime errors. A failure after transmission can leave an Unknown
+    /// receipt; inspect it rather than issuing a new business key.
     pub async fn deliver(&self, s: Scope, id: i64) -> Result<Receipt, Error> {
         scope(&s)?;
         self.run(move |db, transport| {
@@ -288,6 +308,9 @@ impl Notifications {
         .await
     }
     /// Bounded recovery inventory; never resends or resets uncertain attempts.
+    ///
+    /// # Errors
+    /// Returns invalid scope/cursor/limit, closed-service, storage or runtime errors.
     pub async fn recover(&self, s: Scope, after: i64, limit: u32) -> Result<Vec<Receipt>, Error> {
         scope(&s)?;
         if after < 0 || limit == 0 || limit > 100 {
@@ -300,6 +323,9 @@ impl Notifications {
         }).await
     }
     /// Waits for serialized admitted operations and closes the connection; cancellation safe.
+    ///
+    /// # Errors
+    /// Returns `Runtime` if the connection mutex is poisoned or the worker fails.
     pub async fn close(&self) -> Result<(), Error> {
         let db = self.db.clone();
         tokio::task::spawn_blocking(move || {

@@ -10,6 +10,9 @@ description = "Decisions over trusted facts, exact-scope RBAC, and optional Lens
 default = ["plugin"]
 plugin = ["dep:lenso-plugin-core"]
 
+[lints]
+workspace = true
+
 [dependencies]
 lenso-plugin-core = { workspace = true, optional = true }
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }

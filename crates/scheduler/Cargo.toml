@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 description = "Durable cron scheduling with IANA timezones and a SQLite task outbox"
 
+[lints]
+workspace = true
+
 [dependencies]
 lenso-plugin-core.workspace = true
 lenso-tasks = { path = "../tasks" }

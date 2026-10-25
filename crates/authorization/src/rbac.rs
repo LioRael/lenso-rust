@@ -41,6 +41,11 @@ pub trait RoleSource: Send + Sync {
     fn read<'a>(&'a self, evaluation: &'a Evaluation) -> EvaluationFuture<'a, Arc<RoleSnapshot>>;
 }
 
+/// Validate role references, scope isolation and bounded acyclic inheritance.
+///
+/// # Errors
+/// Returns [`RoleGraphError`] for invalid/duplicate actions, malformed roles or
+/// bindings, missing references, cycles, or graph limits being exceeded.
 pub fn validate_role_graph(graph: &RoleGraph, actions: &[String]) -> Result<(), RoleGraphError> {
     let known: HashSet<_> = actions.iter().collect();
     if actions.is_empty()
@@ -139,6 +144,10 @@ pub struct MemoryRoleStore {
     current: RwLock<Arc<RoleSnapshot>>,
 }
 impl MemoryRoleStore {
+    /// Create a validated initial role snapshot.
+    ///
+    /// # Errors
+    /// Returns the failures from [`validate_role_graph`].
     pub fn new(
         graph: RoleGraph,
         actions: impl IntoIterator<Item = impl Into<String>>,
@@ -150,11 +159,19 @@ impl MemoryRoleStore {
             current: RwLock::new(Arc::new(RoleSnapshot { revision: 0, graph })),
         })
     }
+    /// Read the current immutable graph and revision.
+    ///
+    /// # Errors
+    /// Returns [`RoleGraphError`] if the store lock is poisoned.
     pub fn snapshot(&self) -> Result<Arc<RoleSnapshot>, RoleGraphError> {
         Ok(self.current.read().map_err(|_| RoleGraphError)?.clone())
     }
     /// Call only behind the application's own administrative authorization boundary.
     /// Cancellation checked at commit; cancellation after commit cannot undo it.
+    ///
+    /// # Errors
+    /// Returns [`RoleGraphError`] for an invalid replacement graph, poisoned
+    /// lock, or revision exhaustion. Conflicts and cancellation return `Ok(false)`.
     pub fn compare_and_swap(
         &self,
         expected_revision: u64,
@@ -207,6 +224,10 @@ pub struct Rbac {
     source: Arc<dyn RoleSource>,
 }
 impl Rbac {
+    /// Evaluate against one fixed validated graph.
+    ///
+    /// # Errors
+    /// Returns the failures from [`validate_role_graph`].
     pub fn new(
         graph: RoleGraph,
         actions: impl IntoIterator<Item = impl Into<String>>,
@@ -221,6 +242,10 @@ impl Rbac {
             }))),
         })
     }
+    /// Evaluate against fresh snapshots from a trusted source.
+    ///
+    /// # Errors
+    /// Returns [`RoleGraphError`] for invalid or duplicate registered actions.
     pub fn from_source(
         actions: impl IntoIterator<Item = impl Into<String>>,
         source: Arc<dyn RoleSource>,
@@ -229,6 +254,11 @@ impl Rbac {
         validate_role_graph(&RoleGraph::default(), &actions)?;
         Ok(Self { actions, source })
     }
+    /// Check exact identity, scope, binding expiry and inherited permissions.
+    ///
+    /// # Errors
+    /// Returns [`EvaluationError`] for cancellation, failed source reads, or an
+    /// invalid source graph. Absence of a matching grant returns `Ok(false)`.
     pub async fn permits(
         &self,
         request: &Request,

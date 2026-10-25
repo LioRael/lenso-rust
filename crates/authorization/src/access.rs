@@ -39,6 +39,10 @@ pub struct AuthorizedAccess<E> {
 }
 
 impl<E: Send + Sync> AuthorizedAccess<E> {
+    /// Bind access verification to an exact trusted realm and audience.
+    ///
+    /// # Errors
+    /// Returns [`ConfigurationError`] for invalid realm or audience identifiers.
     pub fn new(
         realm: impl Into<String>,
         audience: impl Into<String>,
@@ -118,6 +122,11 @@ impl<E: Send + Sync> AuthorizedAccess<E> {
             .is_allowed()
     }
 
+    /// Require a fresh verified identity and an allowed resource decision.
+    ///
+    /// # Errors
+    /// Returns [`AuthorizationError`] for any non-allow decision, including
+    /// verification failure, expiry, timeout, or policy evaluation failure.
     pub async fn enforce(
         &self,
         evidence: E,
@@ -132,6 +141,11 @@ impl<E: Send + Sync> AuthorizedAccess<E> {
         }
     }
 
+    /// Enforce access with caller-controlled cancellation.
+    ///
+    /// # Errors
+    /// Returns [`AuthorizationError`] for cancellation or any failure described
+    /// by [`Self::enforce`].
     pub async fn enforce_with_cancellation(
         &self,
         evidence: E,

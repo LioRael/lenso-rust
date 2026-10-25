@@ -95,6 +95,10 @@ impl std::error::Error for RuntimeStartError {
 
 /// Complete native setup, then bind and activate only the explicitly selected handles.
 /// An empty export list supports outbound-only applications without sending ready.
+///
+/// # Errors
+/// Returns duplicate-export, native startup, transport or activation errors.
+/// Activation failures retain any rollback failure in [`RuntimeStartError`].
 pub async fn start_runtime_app(
     app: App,
     exports: Vec<RuntimeExport>,

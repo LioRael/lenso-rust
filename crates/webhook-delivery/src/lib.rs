@@ -68,6 +68,9 @@ pub(crate) fn identifier(value: &str) -> Result<(), Error> {
     }
 }
 /// Explicit provisioning only; use a dedicated local database, never Storage tables.
+///
+/// # Errors
+/// Returns database open/DDL or blocking-worker failures.
 pub async fn provision(path: impl AsRef<Path>) -> Result<(), Error> {
     let path = path.as_ref().to_owned();
     tokio::task::spawn_blocking(move || -> Result<(), Error> {
@@ -140,6 +143,10 @@ impl Delivery {
     }
     /// The authenticated host supplies a globally unique stable business event ID.
     /// Persist exact JSON bytes once; retries never deserialize/reserialize them.
+    ///
+    /// # Errors
+    /// Returns invalid ID/payload/budget, immutable-event conflict, closed-service,
+    /// database or runtime failures. Reconcile using the original event ID.
     pub async fn create(
         &self,
         event_id: String,
@@ -182,10 +189,15 @@ impl Delivery {
         })
         .await
     }
+    /// # Errors
+    /// Returns missing event, endpoint conflict, invalid persisted state, lifecycle,
+    /// database or runtime failures.
     pub async fn status(&self, event_id: String) -> Result<Receipt, Error> {
         self.run(move |db, this| read(db, &event_id, &this.endpoint.identity))
             .await
     }
+    /// # Errors
+    /// Returns scoped receipt-read failures from [`Self::status`] or history-query failures.
     pub async fn attempts(&self, event_id: String) -> Result<Vec<Attempt>, Error> {
         self.run(move |db, this| {
             read(db, &event_id, &this.endpoint.identity)?;
@@ -204,6 +216,9 @@ impl Delivery {
         .await
     }
     /// Pause prevents subsequent attempts; it cannot undo an already accepted remote effect.
+    ///
+    /// # Errors
+    /// Returns scoped receipt-read, lifecycle, database or runtime failures.
     pub async fn pause(&self, event_id: String) -> Result<Receipt, Error> {
         self.run(move |db,this| {
             let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -215,6 +230,10 @@ impl Delivery {
     /// Reopens paused/unknown only, adding exactly one permitted attempt without
     /// changing event ID, endpoint, payload or history. Host must schedule a new Tasks
     /// job with a new dedupe key; a previously successful Tasks job is not reopened.
+    ///
+    /// # Errors
+    /// Returns scoped receipt-read, lifecycle, database or runtime failures.
+    /// Inspect uncertain replay state before requesting another attempt.
     pub async fn replay(&self, event_id: String, _: ReplayConsent) -> Result<Receipt, Error> {
         self.run(move |db,this| {
             let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -224,6 +243,11 @@ impl Delivery {
         }).await
     }
     /// One attempt only; no sleeping, polling, timer or internal queue. Prefer `task`.
+    ///
+    /// # Errors
+    /// Returns scoped receipt-read, lifecycle, database or runtime failures.
+    /// A failure may follow a remote effect; inspect the original event rather
+    /// than assuming transmission did not occur. Ambiguous sends persist as Unknown.
     pub async fn deliver(
         &self,
         event_id: String,

@@ -103,6 +103,9 @@ impl<S: LogSource> LogAggregator<S> {
         Self { source, config }
     }
 
+    /// # Errors
+    /// Returns source-read or aggregation errors; empty batches and overflowing
+    /// totals are rejected rather than producing partial summaries.
     pub fn summarize(&self) -> Result<Summary, LogAggregationError<S::Error>> {
         let logs = self
             .source
@@ -113,11 +116,15 @@ impl<S: LogSource> LogAggregator<S> {
     }
 
     /// Applies this instance's classification to supplied records without reading its source.
+    /// # Errors
+    /// Returns [`AggregateError`] for an empty batch or arithmetic overflow.
     pub fn aggregate_records(&self, logs: &[LogRecord]) -> Result<Summary, AggregateError> {
         self.aggregate_records_with_cancellation(logs, || false)
     }
 
     /// Uses the same native loop as source-backed aggregation and transport-free calls.
+    /// # Errors
+    /// Returns [`AggregateError`] for an empty batch, cancellation, or arithmetic overflow.
     pub fn aggregate_records_with_cancellation(
         &self,
         logs: &[LogRecord],

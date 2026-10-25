@@ -18,6 +18,8 @@ pub struct Endpoint {
 impl Endpoint {
     /// Caller resolves DNS at configuration time. Every connection uses this checked
     /// address, while TLS still verifies the URL hostname. Rebuild to refresh DNS.
+    /// # Errors
+    /// Returns `Invalid` for unsafe destinations, invalid identity/key or timeout.
     pub fn https(
         url: &str,
         address: IpAddr,
@@ -44,6 +46,8 @@ impl Endpoint {
     }
     /// Explicit local HTTP fixture adapter. Always connects to IPv4 loopback.
     /// Never select this constructor from untrusted input or production config.
+    /// # Errors
+    /// Returns `Invalid` for invalid port, signing key or timeout.
     pub fn local_fixture(port: u16, key: Vec<u8>, timeout: Duration) -> Result<Self, Error> {
         Self::build(
             url::Url::parse(&format!("http://127.0.0.1:{port}/events"))

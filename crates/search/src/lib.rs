@@ -104,6 +104,9 @@ fn configure(conn: &Connection) -> Result<()> {
 }
 
 /// Explicit DDL step on a host-selected application database. Never called by startup.
+///
+/// # Errors
+/// Returns `Fts5Unavailable` without FTS5 support or `Storage` for database/DDL failures.
 pub fn provision(path: impl AsRef<Path>) -> Result<()> {
     let mut conn = db(Connection::open(path))?;
     configure(&conn)?;
@@ -132,6 +135,9 @@ pub struct Search {
     gate: WorkGate,
 }
 impl Search {
+    /// # Errors
+    /// Returns `Storage`, `Fts5Unavailable` or `NotProvisioned` when the existing
+    /// database cannot be opened with the required FTS schema.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         Self::open_with_gate(path.as_ref(), WorkGate::default())
     }
@@ -160,6 +166,9 @@ impl Search {
         f(lock.as_mut().ok_or(SearchError::Closed)?)
     }
     /// Writes only this partition. On ownership changes the host must delete the OLD scope too.
+    ///
+    /// # Errors
+    /// Returns `InvalidInput` for invalid scope/note data, or `Closed`/`Storage`.
     pub fn upsert(&self, scope: &Scope, note: Note<'_>) -> Result<()> {
         self.with(|conn| {
             scope.validate()?; name(note.id)?;
@@ -168,6 +177,8 @@ impl Search {
             Ok(())
         })
     }
+    /// # Errors
+    /// Returns invalid scope/ID, closed-service or storage failures. Absence is `Ok(false)`.
     pub fn delete(&self, scope: &Scope, id: &str) -> Result<bool> {
         self.with(|conn| {
             scope.validate()?; name(id)?;
@@ -177,6 +188,10 @@ impl Search {
     /// All whitespace-separated terms must match (literal FTS phrases; no query operators).
     /// Title substring matches sort first, then binary note ID; no cross-scope BM25 statistics.
     /// Pagination is capped at 10,000 results and invalidated by ANY database mutation.
+    ///
+    /// # Errors
+    /// Returns invalid scope/query/limit, invalid or stale cursor, closed-service
+    /// or storage failures. Restart pagination after a stale-cursor error.
     pub fn query(
         &self,
         scope: &Scope,
@@ -211,6 +226,9 @@ impl Search {
         })
     }
     /// Waits for synchronous operations, then closes; retained services reject further work.
+    ///
+    /// # Errors
+    /// Returns `Storage` for mutex poisoning or SQLite close failure.
     pub fn close(&self) -> Result<()> {
         let mut lock = self.connection.lock().map_err(|_| SearchError::Storage)?;
         if let Some(conn) = lock.take() {

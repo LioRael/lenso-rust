@@ -59,6 +59,10 @@ impl Default for CacheConfig {
 }
 impl CacheConfig {
     /// Validate without acquiring resources.
+    ///
+    /// # Errors
+    /// Returns `InvalidInput` for invalid names, zero capacities, or TTLs outside
+    /// the supported range.
     pub fn validate(&self) -> Result<(), CacheError> {
         name(&self.namespace)?;
         if self.max_ttl.is_zero()
@@ -267,6 +271,9 @@ impl Drop for Waiter {
 }
 impl<V: Serialize + DeserializeOwned + Send + Sync + 'static> MemoryCache<V> {
     /// Creates an isolated backend. No work is spawned until loading or closing.
+    ///
+    /// # Errors
+    /// Returns the configuration validation failures from [`CacheConfig::validate`].
     pub fn new(config: CacheConfig) -> Result<Self, CacheError> {
         config.validate()?;
         let path = vec![config.namespace.clone()];
@@ -330,6 +337,10 @@ impl<V: Serialize + DeserializeOwned + Send + Sync + 'static> MemoryCache<V> {
         Ok(Arc::new(writer.bytes))
     }
     /// Hit/miss is separate from V; cached Option::None is Some(None).
+    ///
+    /// # Errors
+    /// Returns an error for an invalid key, closed/poisoned state, or failed
+    /// deserialization. A cache miss is `Ok(None)`.
     pub fn get(&self, key: &str) -> Result<Option<V>, CacheError> {
         let address = self.address(key)?;
         let bytes = self.state()?.entries.get(&address).map(|e| e.bytes.clone());
@@ -339,6 +350,9 @@ impl<V: Serialize + DeserializeOwned + Send + Sync + 'static> MemoryCache<V> {
     }
     /// Ordered per-key reads, duplicates preserved, at most 100 keys.
     /// Prunes the family once, without snapshotting later keys or their expiry.
+    ///
+    /// # Errors
+    /// Returns `InvalidInput` above 100 keys, or the first [`Self::get`] failure.
     pub fn get_many(&self, keys: &[&str]) -> Result<Vec<Option<V>>, CacheError> {
         if keys.len() > 100 {
             return Err(CacheError::InvalidInput);
@@ -364,6 +378,10 @@ impl<V: Serialize + DeserializeOwned + Send + Sync + 'static> MemoryCache<V> {
             .collect()
     }
     /// Stores a serialized copy; zero TTL deletes and fences pending writeback.
+    ///
+    /// # Errors
+    /// Returns an error for invalid keys/TTLs, closed/poisoned state, or JSON
+    /// conversion exceeding the configured value or storage budget.
     pub fn set(
         &self,
         key: &str,
@@ -386,6 +404,9 @@ impl<V: Serialize + DeserializeOwned + Send + Sync + 'static> MemoryCache<V> {
         Ok(WriteOutcome::Stored)
     }
     /// Deletes only this key and fences old loaders.
+    ///
+    /// # Errors
+    /// Returns an error for an invalid key or closed/poisoned state.
     pub fn delete(&self, key: &str) -> Result<(), CacheError> {
         let address = self.address(key)?;
         let mut state = self.state()?;
@@ -394,6 +415,9 @@ impl<V: Serialize + DeserializeOwned + Send + Sync + 'static> MemoryCache<V> {
         Ok(())
     }
     /// Invalidates this exact scope, not its ancestors or descendants.
+    ///
+    /// # Errors
+    /// Returns `Closed` or `Internal` when the family is closed or its mutex is poisoned.
     pub fn invalidate(&self) -> Result<(), CacheError> {
         let mut state = self.state()?;
         let addresses: Vec<_> = state
@@ -410,6 +434,9 @@ impl<V: Serialize + DeserializeOwned + Send + Sync + 'static> MemoryCache<V> {
         Ok(())
     }
     /// Adds a validated segment, with at most 16 total segments.
+    ///
+    /// # Errors
+    /// Returns an error for an invalid segment, excessive depth, or closed/poisoned state.
     pub fn scope(&self, segment: &str) -> Result<Self, CacheError> {
         name(segment)?;
         drop(self.state()?);
@@ -422,6 +449,11 @@ impl<V: Serialize + DeserializeOwned + Send + Sync + 'static> MemoryCache<V> {
     }
     /// First caller chooses loader/TTL. Dropping a waiter cannot cancel peers.
     /// Last waiter cancellation aborts the loader at its next yield point.
+    ///
+    /// # Errors
+    /// Returns input, lifecycle, capacity, serialization, or loader failures.
+    /// Loader errors retain their cause via [`CacheError::loader_cause`]; panics
+    /// become `LoaderPanicked`. Failed loads are not cached.
     pub async fn get_or_set<F, Fut, E>(
         &self,
         key: &str,
@@ -528,6 +560,10 @@ impl<V: Serialize + DeserializeOwned + Send + Sync + 'static> MemoryCache<V> {
     }
     /// Seals all views, aborts loaders, then joins within one total timeout.
     /// Once started, close continues even if this close waiter is dropped.
+    ///
+    /// # Errors
+    /// Returns `CloseTimeout` if aborted loaders do not join within the configured
+    /// budget, or `Internal` on synchronization failure. The family stays closed.
     pub async fn close(&self) -> Result<(), CacheError> {
         let mut completion = self.inner.close.subscribe();
         {

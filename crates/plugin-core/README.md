@@ -92,7 +92,7 @@ or remote `call` API is supplied. A host wanting a persistent development sessio
 must own startup, identity, transport, admission, readiness, and shutdown; static
 inspection cannot prove any of those runtime properties.
 
-Diagnostics have a stable snake_case `code`, optional owning `instance` index,
+Diagnostics have a stable `snake_case` `code`, optional owning `instance` index,
 optional declaration `dependency_index`, closed cycle `path`, and fixed `message`.
 Indices resolve against `instances` in insertion order; missing/foreign handles
 have `target: null` because Core cannot safely invent their names. Cycle paths

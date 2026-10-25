@@ -51,8 +51,12 @@ impl IntoResponse for HttpError {
 }
 /// Applications own semantic validation and resource authorization.
 pub trait Validate {
+    /// # Errors
+    /// Return a safe transport classification when business input validation fails.
     fn validate(&self) -> Result<(), HttpError>;
 }
+/// # Errors
+/// Returns `Invalid` for JSON decoding failure, or the input validator's [`HttpError`].
 pub fn json_input<T: DeserializeOwned + Validate>(bytes: &[u8]) -> Result<T, HttpError> {
     let input: T = serde_json::from_slice(bytes).map_err(|_| HttpError::Invalid)?;
     input.validate()?;

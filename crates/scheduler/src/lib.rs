@@ -142,6 +142,8 @@ pub struct TickReport {
 
 /// Explicitly create scheduler tables and bind a durable identity to one Tasks queue.
 /// Opening the plugin never creates or migrates a database.
+/// # Errors
+/// Returns invalid identifiers, queue binding conflicts, SQLite or worker failures.
 pub async fn provision(
     path: impl AsRef<Path>,
     name: &str,
@@ -181,15 +183,22 @@ impl Scheduler {
     }
 
     /// Idempotent for the identical definition. Definitions cannot be overwritten.
+    /// # Errors
+    /// Returns invalid calendar/schedule, definition conflict, closed admission,
+    /// SQLite or worker failures. Reconcile uncertain creation using the same key.
     pub async fn create(&self, schedule: Schedule) -> Result<ScheduleStatus, SchedulerError> {
         calendar::validate(&schedule)?;
         self.database(move |db| db.create(schedule)).await
     }
+    /// # Errors
+    /// Returns invalid key, closed admission, SQLite or worker failures.
     pub async fn get(&self, key: &str) -> Result<Option<ScheduleStatus>, SchedulerError> {
         let key = key.to_owned();
         self.database(move |db| db.get(&key)).await
     }
     /// Bounded history projection; inputs and provider error text are never returned.
+    /// # Errors
+    /// Returns invalid pagination arguments, closed admission, SQLite or worker failures.
     pub async fn occurrences(
         &self,
         schedule_id: i64,
@@ -204,6 +213,10 @@ impl Scheduler {
     }
     /// Finite host-driven invocation. now is a trusted host UTC clock, Unix milliseconds.
     /// An error/cancelled waiter can follow committed progress; retry is safe.
+    /// # Errors
+    /// Returns invalid time/options, closed admission, SQLite or worker failures.
+    /// Earlier phases may already have committed; pending outbox rows remain
+    /// recoverable. Individual delivery refusals are recorded in the tick report.
     pub async fn tick(&self, now: i64, options: TickOptions) -> Result<TickReport, SchedulerError> {
         calendar::validate_instant(now)?;
         options.validate()?;

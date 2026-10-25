@@ -241,6 +241,8 @@ impl WorkerOptions {
 
 /// Explicit provisioning only. Startup and service methods never create a schema.
 /// Use a dedicated local SQLite file; this does not touch Lenso Storage.
+/// # Errors
+/// Returns invalid queue-name, SQLite schema/I/O, or blocking-worker failures.
 pub async fn provision(path: impl AsRef<Path>, queue: &str) -> Result<(), TaskError> {
     validate_name(queue)?;
     let path = path.as_ref().to_owned();
@@ -253,12 +255,16 @@ pub async fn provision(path: impl AsRef<Path>, queue: &str) -> Result<(), TaskEr
 /// Explicit PostgreSQL provisioning; requires PostgreSQL 13+ and a dedicated
 /// schema/database. Uses NoTls; use `provision_postgres_with_options` for TLS.
 #[cfg(feature = "postgres")]
+/// # Errors
+/// Returns invalid queue-name, connection, schema or blocking-worker failures.
 pub async fn provision_postgres(config: PostgresConfig, queue: &str) -> Result<(), TaskError> {
     provision_postgres_with_options(PostgresOptions::new(config), queue).await
 }
 
 /// Explicit provisioning with a caller-selected TLS connector. Opens one connection.
 #[cfg(feature = "postgres")]
+/// # Errors
+/// Returns invalid queue/options, connection, schema or blocking-worker failures.
 pub async fn provision_postgres_with_options(
     config: PostgresOptions,
     queue: &str,
@@ -306,6 +312,10 @@ impl Tasks {
         })
         .await
     }
+    /// # Errors
+    /// Returns invalid input/options, unknown task, deduplication conflict, closed
+    /// admission or provider/runtime errors. Reconcile an uncertain submission
+    /// using its original deduplication key rather than inventing a new key.
     pub async fn enqueue(
         &self,
         task: &str,
@@ -316,14 +326,20 @@ impl Tasks {
         self.admitted(move |db| db.enqueue(&definition, &input, &options))
             .await
     }
+    /// # Errors
+    /// Returns admission, provider or runtime errors; absent jobs return `Ok(None)`.
     pub async fn get(&self, id: i64) -> Result<Option<JobStatus>, TaskError> {
         self.admitted(move |db| db.get(id)).await
     }
+    /// # Errors
+    /// Returns invalid key, admission, provider or runtime errors; absence is `Ok(None)`.
     pub async fn lookup(&self, key: &str) -> Result<Option<JobStatus>, TaskError> {
         let key = key.to_owned();
         self.admitted(move |db| db.lookup(&key)).await
     }
     /// One bounded page, scoped to an explicitly chosen registered task; excludes input.
+    /// # Errors
+    /// Returns invalid task/cursor/limit, admission, provider or runtime errors.
     pub async fn list(
         &self,
         task: &str,
@@ -339,11 +355,17 @@ impl Tasks {
         let task = task.to_owned();
         self.admitted(move |db| db.list(&task, after, limit)).await
     }
+    /// # Errors
+    /// Returns admission, provider or runtime errors. Cancellation requests do not
+    /// undo effects or prove that a running handler has settled.
     pub async fn cancel(&self, id: i64) -> Result<CancelResult, TaskError> {
         self.admitted(move |db| db.cancel(id)).await
     }
     /// Only failed jobs qualify. Adds one attempt without resetting history.
     /// The trusted host must first decide whether replay is safe for this business task.
+    /// # Errors
+    /// Returns admission, provider or runtime errors. Reopening a failed job does
+    /// not undo its previous effects; handlers still need business idempotency.
     pub async fn retry(&self, id: i64) -> Result<bool, TaskError> {
         self.admitted(move |db| db.retry(id)).await
     }

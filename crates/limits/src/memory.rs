@@ -11,6 +11,8 @@ use std::{
 
 /// Millisecond epoch clock. Called inside the store lock; must be quick and non-reentrant.
 pub trait Clock: Send + Sync + 'static {
+    /// # Errors
+    /// Returns a clock/provider failure when a trustworthy timestamp is unavailable.
     fn now_ms(&self) -> Result<u64, LimitError>;
 }
 impl<F: Fn() -> u64 + Send + Sync + 'static> Clock for F {

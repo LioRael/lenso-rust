@@ -44,6 +44,7 @@ pub struct ConfigFieldSource {
 /// Only selected environment variables are read. Each is parsed as JSON (strings
 /// must be quoted). Field paths are object-only JSON pointers, not a config DSL.
 /// Absent environment variables leave explicit values/defaults unchanged.
+#[must_use = "resolve the configuration or retain the updated builder"]
 pub struct Config<T> {
     instance: String,
     explicit: Value,
@@ -120,11 +121,20 @@ impl<T: DeserializeOwned> Config<T> {
     }
 
     /// Resolve and deserialize without exposing values in any error chain.
+    ///
+    /// # Errors
+    /// Returns a redacted [`ConfigError`] for a non-object explicit value, invalid
+    /// override pointer, non-Unicode or malformed environment JSON, a non-object
+    /// override parent, or values that cannot deserialize into `T`.
     pub fn resolve(self) -> Result<T, ConfigError> {
         self.resolve_with_sources().map(|(value, _)| value)
     }
 
     /// Resolve and return source metadata without configuration values.
+    ///
+    /// # Errors
+    /// Returns the same redacted configuration and deserialization failures as
+    /// [`Self::resolve`]. Diagnostics expose only declared, non-sensitive paths.
     pub fn resolve_with_sources(self) -> Result<(T, Vec<ConfigFieldSource>), ConfigError> {
         let instance = self.instance;
         let error = |path: String, origin: ConfigSource, reason| ConfigError {

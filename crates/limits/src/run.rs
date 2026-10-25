@@ -37,6 +37,8 @@ impl LeaseCancellation {
     pub fn reason(&self) -> Option<LeaseStopReason> {
         *self.state.borrow()
     }
+    /// # Errors
+    /// Returns the recorded stop reason after cancellation has been signalled.
     pub fn check(&self) -> Result<(), LeaseStopReason> {
         self.reason().map_or(Ok(()), Err)
     }
@@ -169,6 +171,11 @@ impl<S: LimitStore> Limits<S> {
     /// cooperative business work and releases the lease. A callback which ignores the
     /// signal can delay close indefinitely. No callback is forcibly aborted; external
     /// effects are never rolled back. Do not await this service's close from its callback.
+    ///
+    /// # Errors
+    /// Returns [`LeaseRunError`] for validation/runtime/admission failures, denial,
+    /// lost protection, cancellation, callback failure or release failure. Business
+    /// and cleanup errors are retained together; effects may already have occurred.
     pub async fn with_lease<F, Fut, T, E>(
         self: &Arc<Self>,
         input: AcquireInput,

@@ -10,6 +10,8 @@ pub struct MemoryAuditRepository {
 }
 
 impl MemoryAuditRepository {
+    /// # Errors
+    /// Returns [`AuditError::InvalidInput`] when the event capacity is zero.
     pub fn new(max_events: usize) -> Result<Self, AuditError> {
         if max_events == 0 {
             return Err(AuditError::InvalidInput);

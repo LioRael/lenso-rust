@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 description = "Bounded ephemeral events and an explicit local durable outbox"
 
+[lints]
+workspace = true
+
 [dependencies]
 lenso-plugin-core.workspace = true
 tokio.workspace = true
