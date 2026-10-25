@@ -1,0 +1,192 @@
+.github/workflows/check.yml
+  h_9d56aba080c170 39-42
+Cargo.toml
+  h_9d56aba080c170 53-56
+crates/audit/Cargo.toml
+  h_9d56aba080c170 13-15
+crates/audit/src/contracts.rs
+  h_9d56aba080c170 335-337
+crates/audit/src/memory.rs
+  h_9d56aba080c170 13-14
+crates/audit/src/service.rs
+  h_9d56aba080c170 47-48,72,79,199-201,213-216,238-240,255-257,297-301,338-342
+crates/audit/src/sqlite.rs
+  h_9d56aba080c170 19-20
+crates/authorization/Cargo.toml
+  h_9d56aba080c170 13-15
+crates/authorization/src/access.rs
+  h_9d56aba080c170 42-45,125-129,144-148
+crates/authorization/src/engine.rs
+  h_9d56aba080c170 180-184,232-235,254-257,265-268,284-288
+crates/authorization/src/facts.rs
+  h_9d56aba080c170 259-262
+crates/authorization/src/plugin.rs
+  h_9d56aba080c170 18-21
+crates/authorization/src/rbac.rs
+  h_9d56aba080c170 44-48,147-150,162-165,171-174,227-230,245-248,257-261
+crates/cache/Cargo.toml
+  h_9d56aba080c170 7-9
+crates/cache/src/lib.rs
+  h_9d56aba080c170 62-65,274-276,340-343,353-355,381-384,407-409,418-420,437-439,452-456,563-566
+crates/configuration/Cargo.toml
+  h_9d56aba080c170 7-9
+crates/configuration/src/lib.rs
+  h_9d56aba080c170 141-142,157-160
+crates/data-import/Cargo.toml
+  h_9d56aba080c170 7-9
+crates/data-import/src/lib.rs
+  h_9d56aba080c170 124-125,129-130,186-189,203-207
+crates/events/Cargo.toml
+  h_9d56aba080c170 8-10
+crates/events/src/lib.rs
+  h_9d56aba080c170 66-67,79-80,101-104
+crates/events/src/outbox.rs
+  h_9d56aba080c170 40-42,122-126,144-146,159-162
+crates/feature-flags/Cargo.toml
+  h_9d56aba080c170 7-9
+crates/feature-flags/src/lib.rs
+  h_9d56aba080c170 84-86,95-97,139-140,153-156,185-188,221-222
+crates/i18n/Cargo.toml
+  h_9d56aba080c170 7-9
+crates/i18n/src/lib.rs
+  h_9d56aba080c170 162-164,180-183,214-216,242-244,256-258
+crates/limits/Cargo.toml
+  h_9d56aba080c170 8-10
+crates/limits/src/memory.rs
+  h_9d56aba080c170 14-15
+crates/limits/src/run.rs
+  h_9d56aba080c170 40-41,174-178
+crates/limits/src/service.rs
+  h_9d56aba080c170 48-50,55-56,69-71,91-94,111-113,129-132,174-176,204-206
+crates/limits/src/types.rs
+  h_9d56aba080c170 22-23,68-70,87-89,137-139,234-236,238-239,241-242,249-250,255-257
+crates/log-plugins/Cargo.toml
+  h_9d56aba080c170 7-9
+crates/log-plugins/src/aggregate.rs
+  h_9d56aba080c170 49-51,57-59
+crates/log-plugins/src/plugins.rs
+  h_9d56aba080c170 106-108,119-120,126-127
+crates/log-plugins/src/source.rs
+  h_9d56aba080c170 15-17
+crates/log/Cargo.toml
+  h_9d56aba080c170 8-10
+crates/log/README.md
+  h_9d56aba080c170 34-36,112-115
+crates/log/src/lib.rs
+  h_9d56aba080c170 7,13,16,118-121,146-147,151-193,282-287,297,335-337,343-345,350-352,357-359,364-366,371-373,378-380,393-396,423-430,434-438,485-489,492-510,512,520-525
+crates/log/tests/reentrancy.rs
+  h_9d56aba080c170 1-121
+crates/mcp/Cargo.toml
+  h_9d56aba080c170 17-19
+crates/mcp/src/lib.rs
+  h_9d56aba080c170 197-213,356-360,458-463,504-508,546-549,560-564,572-573,575,622-624,632-640,682
+crates/mcp/src/stdio.rs
+  h_9d56aba080c170 59-62,79-81,87-90
+crates/mcp/tests/reentrancy.rs
+  h_9d56aba080c170 1-167
+crates/media/Cargo.toml
+  h_9d56aba080c170 7-9
+crates/media/src/lib.rs
+  h_9d56aba080c170 69,212-216,299-302,359-360
+crates/notifications-smtp/Cargo.toml
+  h_9d56aba080c170 7-9
+crates/notifications-smtp/src/lib.rs
+  h_9d56aba080c170 45-48,72-74
+crates/notifications/Cargo.toml
+  h_9d56aba080c170 7-9
+crates/notifications/src/lib.rs
+  h_9d56aba080c170 133-135,161-163,209-211,222-225,252-253,260-264,311-313,326-328
+crates/notifications/src/resend.rs
+  h_9d56aba080c170 19-20,37-38
+crates/organization/Cargo.toml
+  h_9d56aba080c170 8-10
+crates/organization/src/lib.rs
+  h_9d56aba080c170 323-327
+crates/otel/Cargo.toml
+  h_9d56aba080c170 6-8
+crates/otel/src/lib.rs
+  h_9d56aba080c170 120-122,154-157,218-221
+crates/plugin-core/Cargo.toml
+  h_9d56aba080c170 9-11
+crates/plugin-core/README.md
+  h_9d56aba080c170 95
+crates/plugin-core/src/config.rs
+  h_9d56aba080c170 47,124-128,134-137
+crates/plugin-core/src/lib.rs
+  h_9d56aba080c170 92-95,162-165,213-216,296-298,393,480-484,640-643,653-656
+crates/plugin-runtime/Cargo.toml
+  h_9d56aba080c170 7-9
+crates/plugin-runtime/src/lib.rs
+  h_9d56aba080c170 98-101
+crates/realtime-sse/Cargo.toml
+  h_9d56aba080c170 8-10
+crates/realtime-sse/src/lib.rs
+  h_9d56aba080c170 26-27,52-54,105-106
+crates/realtime/Cargo.toml
+  h_9d56aba080c170 8-10
+crates/realtime/src/contracts.rs
+  h_9d56aba080c170 14-17,208-211
+crates/realtime/src/lib.rs
+  h_9d56aba080c170 55-56,78-80,122-125,209-210,283-286,429-432
+crates/scheduler/Cargo.toml
+  h_9d56aba080c170 8-10
+crates/scheduler/src/lib.rs
+  h_9d56aba080c170 145-146,186-188,193-194,200-201,216-219
+crates/search/Cargo.toml
+  h_9d56aba080c170 8-10
+crates/search/src/lib.rs
+  h_9d56aba080c170 107-109,138-140,169-171,180-181,191-194,229-231
+crates/storage/Cargo.toml
+  h_9d56aba080c170 7-9
+crates/storage/src/local.rs
+  h_9d56aba080c170 39-41,107-109,149-152,199-202,211-213,263-265,290-292,325-327
+crates/storage/src/types.rs
+  h_9d56aba080c170 125-127
+crates/tasks/Cargo.toml
+  h_9d56aba080c170 8-10
+crates/tasks/src/lib.rs
+  h_9d56aba080c170 244-245,258-259,266-267,315-318,329-330,334-335,341-342,358-360,366-368
+crates/tasks/src/owned_worker.rs
+  h_9d56aba080c170 45-46
+crates/tasks/src/plugin.rs
+  h_9d56aba080c170 50
+crates/tasks/src/store/postgres_pool.rs
+  h_9d56aba080c170 51,59
+crates/tasks/src/transaction.rs
+  h_9d56aba080c170 28-31,42-44,61-64,96-100
+crates/tasks/src/worker.rs
+  h_9d56aba080c170 12-15
+crates/usage-quota/Cargo.toml
+  h_9d56aba080c170 8-10
+crates/usage-quota/src/lib.rs
+  h_9d56aba080c170 98-100,118-122,165-167,177-178,197-198,207-208,229-231
+crates/web-axum/Cargo.toml
+  h_9d56aba080c170 7-9
+crates/web-axum/src/lib.rs
+  h_9d56aba080c170 54-55,58-59
+crates/webhook-delivery/Cargo.toml
+  h_9d56aba080c170 7-9
+crates/webhook-delivery/src/http.rs
+  h_9d56aba080c170 21-22,49-50
+crates/webhook-delivery/src/lib.rs
+  h_9d56aba080c170 71-73,146-149,192-194,199-200,219-221,233-236,246-250
+crates/webhook-receiver/Cargo.toml
+  h_9d56aba080c170 6-8
+crates/webhook-receiver/src/lib.rs
+  h_9d56aba080c170 67-68,120-122,154-156,167-168,193-195,205-209
+crates/workflow/Cargo.toml
+  h_9d56aba080c170 7-9
+crates/workflow/src/lib.rs
+  h_9d56aba080c170 312-314,323-325,359-360,371-373,466-468,493-495,559-561,594-595
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "90f672b1fbad06b2079286b774c4dda852875c36",
+  "prompts": {},
+  "humans": {
+    "h_9d56aba080c170": {
+      "author": "LioRael <leo@lenso.dev>"
+    }
+  }
+}
